@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Context-Mixing Bit Predictor</title>
+<style>
+:root{--bg:#0e1116;--panel:#161b22;--panel-2:#1c2330;--line:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--a:#3fb950;--b:#d2a8ff;--c:#f0883e;--d:#39d0d8;--mix:#f778ba;--warn:#e3b341}
+*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:radial-gradient(1200px 600px at 10% -10%,#1b2738 0%,var(--bg) 55%);color:var(--text);line-height:1.45}
+header{padding:28px 24px 8px;max-width:1100px;margin:0 auto}header h1{margin:0 0 6px;font-size:1.55rem}header p{margin:0;color:var(--muted);max-width:720px}
+.wrap{max-width:1100px;margin:0 auto;padding:16px 24px 48px}
+.stage{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin:16px 0}
+.stage h2{margin:0 0 12px;font-size:.95rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:12px}.card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;flex:1 1 180px;min-width:160px}
+.card .tag{font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}.card h3{margin:0 0 6px;font-size:1rem}.card p{margin:0;color:var(--muted);font-size:.88rem}
+.spec-a{border-top:3px solid var(--a)}.spec-b{border-top:3px solid var(--b)}.spec-c{border-top:3px solid var(--c)}.spec-d{border-top:3px solid var(--d)}
+.spec-a .tag{color:var(--a)}.spec-b .tag{color:var(--b)}.spec-c .tag{color:var(--c)}.spec-d .tag{color:var(--d)}
+svg.diagram{width:100%;height:auto;display:block}.legend{display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:10px;color:var(--muted);font-size:.82rem}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px}
+.bits{font-family:ui-monospace,Consolas,monospace;display:flex;gap:6px;flex-wrap:wrap}
+.bit{width:42px;height:42px;border-radius:8px;border:1px solid var(--line);display:grid;place-items:center;background:#0d1117;font-weight:700}
+.bit.on{border-color:var(--accent);color:var(--accent)}.bit.pred{border-color:var(--mix);color:var(--mix)}
+.eq{font-family:ui-monospace,Consolas,monospace;background:#0d1117;border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:.92rem}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:720px){.two{grid-template-columns:1fr}}footer{color:var(--muted);font-size:.8rem;padding-top:8px}
+</style></head><body>
+<header><h1>Context-Mixing Bit Predictor</h1>
+<p>Several cheap specialists each guess the next bit. A tiny mixer learns whom to trust, live. Same idea as PAQ / cmix, mapped onto MDBE named columns.</p></header>
+<div class="wrap">
+<section class="stage"><h2>1. One byte, eight bit decisions</h2>
+<p style="margin:0 0 10px;color:var(--muted)">MSB first. Known bits condition later ones.</p>
+<div class="bits"><div class="bit on">1</div><div class="bit on">0</div><div class="bit on">1</div><div class="bit pred">?</div><div class="bit">·</div><div class="bit">·</div><div class="bit">·</div><div class="bit">·</div></div>
+<p style="margin:10px 0 0;color:var(--muted);font-size:.85rem">Bits 0-2 seen. Predict bit 3. Eight bits = one byte.</p></section>
+<section class="stage"><h2>2. Pipeline</h2>
+<svg class="diagram" viewBox="0 0 1080 420" role="img" aria-label="Architecture diagram">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8b949e"/></marker></defs>
+<rect x="20" y="150" width="150" height="90" rx="12" fill="#1c2330" stroke="#30363d"/>
+<text x="95" y="188" text-anchor="middle" fill="#e6edf3" font-size="15">Context</text>
+<text x="95" y="210" text-anchor="middle" fill="#8b949e" font-size="11">past bytes + bits</text>
+<line x1="170" y1="195" x2="230" y2="195" stroke="#8b949e" marker-end="url(#arrow)"/>
+<rect x="230" y="20" width="200" height="70" rx="10" fill="#12261a" stroke="#3fb950"/>
+<text x="330" y="48" text-anchor="middle" fill="#3fb950" font-size="11" font-weight="700">A  RECENT PATTERN</text>
+<text x="330" y="68" text-anchor="middle" fill="#8b949e" font-size="11">short lookup / last hits</text>
+<rect x="230" y="110" width="200" height="70" rx="10" fill="#1d1630" stroke="#d2a8ff"/>
+<text x="330" y="138" text-anchor="middle" fill="#d2a8ff" font-size="11" font-weight="700">B  LONG MATCH</text>
+<text x="330" y="158" text-anchor="middle" fill="#8b949e" font-size="11">exact earlier stretch</text>
+<rect x="230" y="200" width="200" height="70" rx="10" fill="#2a1c12" stroke="#f0883e"/>
+<text x="330" y="228" text-anchor="middle" fill="#f0883e" font-size="11" font-weight="700">C  BYTE-SHAPE FLAGS</text>
+<text x="330" y="248" text-anchor="middle" fill="#8b949e" font-size="11">MDBE 6 hard flags</text>
+<rect x="230" y="290" width="200" height="70" rx="10" fill="#102428" stroke="#39d0d8"/>
+<text x="330" y="318" text-anchor="middle" fill="#39d0d8" font-size="11" font-weight="700">D  ORDER-N COUNTS</text>
+<text x="330" y="338" text-anchor="middle" fill="#8b949e" font-size="11">Markov frequency table</text>
+<rect x="500" y="145" width="130" height="100" rx="12" fill="#1c2330" stroke="#30363d"/>
+<text x="565" y="188" text-anchor="middle" fill="#e6edf3" font-size="14">Stretch</text>
+<text x="565" y="210" text-anchor="middle" fill="#8b949e" font-size="11">ln(p / (1-p))</text>
+<line x1="430" y1="55" x2="500" y2="175" stroke="#3fb950" stroke-width="1.5"/>
+<line x1="430" y1="145" x2="500" y2="185" stroke="#d2a8ff" stroke-width="1.5"/>
+<line x1="430" y1="235" x2="500" y2="205" stroke="#f0883e" stroke-width="1.5"/>
+<line x1="430" y1="325" x2="500" y2="215" stroke="#39d0d8" stroke-width="1.5"/>
+<line x1="630" y1="195" x2="690" y2="195" stroke="#8b949e" marker-end="url(#arrow)"/>
+<rect x="690" y="130" width="160" height="130" rx="14" fill="#2a1524" stroke="#f778ba"/>
+<text x="770" y="175" text-anchor="middle" fill="#f778ba" font-size="15" font-weight="700">MIXER</text>
+<text x="770" y="198" text-anchor="middle" fill="#e6edf3" font-size="12">w * stretch(pi)</text>
+<text x="770" y="220" text-anchor="middle" fill="#8b949e" font-size="11">online weight update</text>
+<line x1="850" y1="195" x2="910" y2="195" stroke="#8b949e" marker-end="url(#arrow)"/>
+<rect x="910" y="145" width="150" height="100" rx="12" fill="#1c2330" stroke="#58a6ff"/>
+<text x="985" y="185" text-anchor="middle" fill="#58a6ff" font-size="14">Squash</text>
+<text x="985" y="208" text-anchor="middle" fill="#e6edf3" font-size="13">P(bit = 1)</text>
+</svg>
+<div class="legend"><span><i class="dot" style="background:#3fb950"></i>A recent</span>
+<span><i class="dot" style="background:#d2a8ff"></i>B long match</span>
+<span><i class="dot" style="background:#f0883e"></i>C flags</span>
+<span><i class="dot" style="background:#39d0d8"></i>D order-N</span>
+<span><i class="dot" style="background:#f778ba"></i>mixer</span></div></section>
+<section class="stage"><h2>3. Four specialists</h2><div class="row">
+<div class="card spec-a"><div class="tag">A</div><h3>Recent pattern</h3><p>Hash table of n0/n1 for this short context.</p></div>
+<div class="card spec-b"><div class="tag">B</div><h3>Long match</h3><p>Copy the next bit from the longest earlier span.</p></div>
+<div class="card spec-c"><div class="tag">C</div><h3>Byte-shape flags</h3><p>is_alpha, is_digit, is_upper, is_punct, is_space, utf8_lead.</p></div>
+<div class="card spec-d"><div class="tag">D</div><h3>Order-N Markov</h3><p>Frequency of next bit given last N bytes.</p></div>
+</div></section>
+<section class="stage"><h2>4. Mixer math</h2>
+<div class="eq">stretch(p)=ln(p/(1-p))<br/>z = sum w_i * stretch(p_i)<br/>P(bit=1)=squash(z)=1/(1+e^{-z})</div></section>
+<section class="stage"><h2>5. Use of P(bit=1)</h2><div class="two">
+<div class="card"><div class="tag" style="color:var(--accent)">Generate</div><h3>Sample</h3><p>Draw the bit, commit, repeat eight times per byte.</p></div>
+<div class="card"><div class="tag" style="color:var(--warn)">Compress</div><h3>Arithmetic coder</h3><p>Spend fewer bits on predictable data.</p></div></div></section>
+<footer>jdnitrap/context-mixing-bit-predictor — pipeline drawing</footer>
+</div></body></html>
