@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>cmix-bit — mechanical breakdown</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--ink:#e6edf3;--mute:#8b949e;--line:#30363d;--a:#3fb950;--b:#d2a8ff;--c:#f0883e;--d:#39c5cf;--k:#58a6ff}
+*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5}
+header,main{max-width:920px;margin:0 auto;padding:20px 22px}header h1{margin:0 0 8px;font-size:1.6rem}header p{margin:0;color:var(--mute)}
+section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin:14px 0}section h2{margin:0 0 10px;font-size:1.05rem}
+.stepnum{color:var(--k)}ol.mech{margin:0;padding-left:1.2em}ol.mech li{margin:6px 0}
+.box{font-family:ui-monospace,Consolas,monospace;background:#0d1117;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:.86rem;margin-top:10px;overflow-x:auto}
+.row{display:flex;flex-wrap:wrap;gap:10px}.pill{flex:1 1 200px;border:1px solid var(--line);border-radius:12px;padding:12px;background:#0d1117;border-top-width:3px}
+.pill h3{margin:0 0 6px;font-size:.95rem}.pill p{margin:0;color:var(--mute);font-size:.88rem}
+.a{border-top-color:var(--a)}.b{border-top-color:var(--b)}.c{border-top-color:var(--c)}.d{border-top-color:var(--d)}
+table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--mute)}
+.note{color:var(--mute);font-size:.88rem;margin-top:8px}
+</style></head>
+<body>
+<header>
+<h1>cmix-bit — mechanical breakdown</h1>
+<p>What each part does, in order, for one bit. No extra train or fine-tune stage.</p>
+</header>
+<main>
+<section><h2><span class="stepnum">0</span> What the machine is</h2>
+<p>A file is bytes. Each byte is 8 bits, MSB first. The model asks eight times: is the next bit 1?</p>
+<div class="box">byte 0x48 'H' = 0 1 0 0 1 0 0 0</div>
+<p class="note">After bit 7 the byte is committed to hist, hashes, and the match window.</p></section>
+<section><h2><span class="stepnum">1</span> One-bit loop</h2>
+<ol class="mech">
+<li>Build context from finished bytes + bits already decided in this byte.</li>
+<li>Each specialist returns P(bit=1) as 1..4094.</li>
+<li>Mixer turns those six numbers into one p.</li>
+<li>Compress encodes the real bit with p. Decompress recovers the bit from p. Demo prints p. Generate samples p.</li>
+<li>Everyone updates from the real bit.</li>
+<li>Shift the bit into partial. On bit 7, commit the byte.</li>
+</ol>
+<div class="box">for each byte:
+  for k in 0..7:
+    p = mix(specialists)
+    use p
+    update(bit)</div></section>
+<section><h2><span class="stepnum">2</span> Context</h2>
+<table>
+<tr><th>Name</th><th>What it is</th></tr>
+<tr><td>hist</td><td>recent finished bytes (~256)</td></tr>
+<tr><td>last_byte</td><td>previous finished byte, or -1</td></tr>
+<tr><td>bit_index</td><td>0 = MSB .. 7 = LSB</td></tr>
+<tr><td>partial</td><td>bits already decided in this byte</td></tr>
+<tr><td>h0,h1,h2</td><td>running hashes for order-N keys</td></tr>
+<tr><td>window</td><td>last 64 KiB for long match</td></tr>
+</table></section>
+<section><h2><span class="stepnum">3</span> Specialists</h2>
+<p class="note">2048 = no idea. They do not talk to each other.</p>
+<div class="row">
+<div class="pill a"><h3>A recent pattern</h3><p>1M-slot n0/n1 table hashed from last bytes + bit_index + partial.</p></div>
+<div class="pill b"><h3>B long match</h3><p>Longest suffix in the window; take the bit that followed it.</p></div>
+<div class="pill c"><h3>C byte-shape flags</h3><p>MDBE flags: alpha/digit/upper/punct/space/utf8. Hardcoded prior.</p></div>
+<div class="pill d"><h3>D0 D1 D2 order-N</h3><p>Three more n0/n1 tables on three running hashes.</p></div>
+</div></section>
+<section><h2><span class="stepnum">4</span> Stretch / squash</h2>
+<div class="box">stretch(p)=ln(p/(1-p))
+squash(z)=1/(1+e^{-z})</div>
+<p class="note">Add in logit space, then fold back to a probability stored as 1..4094.</p></section>
+<section><h2><span class="stepnum">5</span> Mixer</h2>
+<div class="box">z = sum (w_i * stretch(p_i)) / 128
+p = squash(z)
+err = (bit?4095:0) - p
+nudge each w_i</div>
+<p class="note">This is the training. It runs on every bit. Weights stay in 1..1024.</p></section>
+<section><h2><span class="stepnum">6</span> Arithmetic coder</h2>
+<ol class="mech">
+<li>Split [x1,x2] at p/4096.</li>
+<li>Keep the upper piece for bit 1, lower for bit 0.</li>
+<li>When top bytes of x1 and x2 match, emit or consume that byte.</li>
+</ol>
+<div class="box">header: CMXB + 8-byte length
+then payload + 4-byte flush</div></section>
+<section><h2><span class="stepnum">7</span> Update</h2>
+<ol class="mech">
+<li>Mixer uses err.</li>
+<li>A and D increment n0 or n1; halve when the pair gets large.</li>
+<li>On bit_index==8: push byte into B and hist; refresh hashes.</li>
+</ol></section>
+<section><h2><span class="stepnum">8</span> CLI</h2>
+<table>
+<tr><th>Command</th><th>Uses p to</th><th>Updates from</th></tr>
+<tr><td>compress</td><td>encode known bit</td><td>that bit</td></tr>
+<tr><td>decompress</td><td>recover bit</td><td>recovered bit</td></tr>
+<tr><td>demo</td><td>print votes</td><td>given text</td></tr>
+<tr><td>generate</td><td>sample bit</td><td>sampled bit</td></tr>
+</table></section>
+<section><h2><span class="stepnum">9</span> Test already showed</h2>
+<ol class="mech">
+<li>Cold bits sit at ~2048.</li>
+<li>After a letter, C moves (~1648).</li>
+<li>Late in "repeated", mixed p swings ~200 vs ~3800.</li>
+<li>Weights ended about 172 106 194 128 128 136.</li>
+<li>Round-trip was byte-identical; size still grew.</li>
+</ol></section>
+<section><h2><span class="stepnum">10</span> C++ structs</h2>
+<div class="box">RecentPattern A
+LongMatch B
+ByteShape C
+OrderN D0 D1 D2
+Mixer mix
+Predictor / Encoder / Decoder</div>
+<p class="note">Source: cmix_bit.cpp</p></section>
+</main></body></html>
