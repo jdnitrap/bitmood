@@ -1,5 +1,6 @@
 #include "gen/shape.h"
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <stdexcept>
@@ -14,6 +15,7 @@ static uint8_t fold(uint8_t b) { return (b < 0x80) ? (uint8_t)std::tolower(b) : 
 
 void LineState::accept(uint8_t b) {
   if (b == '\n') {
+    prev_len = col;
     col = 0;
     ++line;
     word.clear();
@@ -135,11 +137,8 @@ void WordListFilter::accept(uint8_t b) {
 // ---- RhymeFilter ----------------------------------------------------------------
 
 void RhymeFilter::restrict(ByteMask& allowed) const {
-  if (target_.empty() || st_.col >= give_up_) return;
-  const bool rhymes = st_.ending() == target_;
-  if (!rhymes) {
-    allowed['\n'] = false;
-  } else if (st_.word.empty() && st_.col >= min_col_) {
+  if (target_.empty() || st_.col < min_col_ || !st_.word.empty()) return;
+  if (st_.ending() == target_) {
     // The rhyming word is finished: end the line here.
     for (int c = 0; c < 256; ++c)
       if (c != '\n') allowed[c] = false;
@@ -148,6 +147,7 @@ void RhymeFilter::restrict(ByteMask& allowed) const {
 
 void RhymeFilter::accept(uint8_t b) {
   if (b == '\n') {
+    if (!target_.empty()) score_ += st_.ending() == target_ ? 1.0 : -1.0;
     // Line 0 of a pair sets the target for line 1; line 1 clears it.
     target_ = (st_.line % 2 == 0) ? st_.ending() : std::string();
   }

@@ -1,5 +1,6 @@
 // Binary arithmetic coder (FPAQ0 style, carryless, 32-bit range).
-// p is P(bit = 1) in 1..4094; bit 1 takes the lower piece of size p.
+// p is P(bit = 1) as a 16-bit value in 1..65535; bit 1 takes the lower
+// piece of the range, of size p / 65536.
 #pragma once
 
 #include <cstddef>

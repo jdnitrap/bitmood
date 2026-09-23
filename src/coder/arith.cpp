@@ -6,7 +6,7 @@ namespace cmix {
 
 namespace {
 inline uint32_t split(uint32_t x1, uint32_t x2, int p) {
-  return x1 + (uint32_t)(((uint64_t)(x2 - x1) * (uint32_t)clampi(p, 1, 4094)) >> 12);
+  return x1 + (uint32_t)(((uint64_t)(x2 - x1) * (uint32_t)clampi(p, kProbMin, kProbMax)) >> 16);
 }
 }  // namespace
 

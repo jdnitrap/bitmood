@@ -6,12 +6,22 @@ namespace cmix {
 
 double score_candidate(const Candidate& c, const BestOfOptions& o) {
   double copy_excess = c.copy > o.copy_allowance ? (double)(c.copy - o.copy_allowance) : 0.0;
-  return -std::fabs(c.bpb - o.target_bpb) - 0.05 * copy_excess - 0.25 * c.spikes;
+  double s = -std::fabs(c.bpb - o.target_bpb) - 0.05 * copy_excess - 0.25 * c.spikes;
+  if (o.typical_len > 0) s -= std::fabs((double)c.bytes.size() - o.typical_len) / o.typical_len;
+  return s;
+}
+
+double typical_line_length(const std::vector<uint8_t>& text) {
+  size_t lines = 1;
+  for (uint8_t b : text) lines += b == '\n';
+  const double len = (double)text.size() / (double)lines;
+  return len < 10 ? 10 : (len > 200 ? 200 : len);
 }
 
 Candidate best_of_line(Generator& g, const BestOfOptions& o, std::shared_ptr<const SuffixArray> training,
                        uint64_t seed, uint64_t unit) {
   const Generator::Snapshot start = g.snapshot();
+  const double satisfied_before = g.satisfaction();
   Candidate best;
   bool have = false;
   for (int k = 0; k < o.candidates; ++k) {
@@ -36,7 +46,7 @@ Candidate best_of_line(Generator& g, const BestOfOptions& o, std::shared_ptr<con
       for (uint8_t b : c.bytes) meter.accept(b);
       c.copy = meter.longest();
     }
-    c.score = score_candidate(c, o);
+    c.score = score_candidate(c, o) + o.goal_weight * (g.satisfaction() - satisfied_before);
     if (!have || c.score > best.score) {
       best = c;
       have = true;

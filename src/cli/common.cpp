@@ -15,10 +15,17 @@ std::unique_ptr<Model> open_or_create(const std::string& path, const Args& a, St
   if (created) {
     Config cfg;
     cfg.type = parse_type(a.str("type", "text"));
+    if (a.has("table-bits")) {
+      long long b = a.integer("table-bits", 22);
+      if (b < 16 || b > 28) throw std::runtime_error("--table-bits must be 16..28");
+      cfg.table_bits = (int)b;
+    }
     s = Stream();
     return std::make_unique<Model>(cfg);
   }
   auto m = load_state(path, s);
+  if (a.has("table-bits") && a.integer("table-bits", 0) != m->config().table_bits)
+    throw std::runtime_error(path + " already exists with --table-bits " + std::to_string(m->config().table_bits));
   if (a.has("type") && parse_type(a.str("type")) != m->config().type)
     throw std::runtime_error(path + " is a " + type_name(m->config().type) + " memory, not " + a.str("type"));
   return m;

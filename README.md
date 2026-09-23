@@ -61,8 +61,8 @@ Creativity controls:
 | `--acrostic WORD` | line *i* starts with letter *i* of WORD |
 | `--max-line N` | lines end by column N |
 | `--words FILE` | only words from FILE (between words: spaces and ordinary punctuation) |
-| `--rhyme` | rough AABB rhyme: the second line of a pair ends on a word ending like the first's |
-| `--best-of N` | write N candidate lines, keep the one whose surprise is closest to real text's, with no nonsense spikes and no long copies |
+| `--rhyme` | rough AABB rhyme: the second line of a pair ends as soon as it finishes a word ending like the first line's; with `--best-of N`, rhyming lines are preferred |
+| `--best-of N` | write N candidate lines, keep the one whose surprise is closest to real text's, with no nonsense spikes, no long copies, and a length like the training text's lines |
 
 Soft rules are relaxed in order when they conflict: novelty first, then
 rhyme, then line length. Charset, line start, acrostic and word list never are.
@@ -95,6 +95,29 @@ predicting best right now, and each winning view gets its own mixer weight
 set, so different regions of a file learn different trust. `compare` shows
 bits per byte with and without the grid, each specialist alone, the
 segments where each view won, and whether learning one file helps the other.
+
+### The engine
+
+| Specialist | Looks at |
+|---|---|
+| O0, D1, **A** (order 2), D3, D4, D5, D6, D8 | the last 0–8 bytes |
+| W1, W2 | the word in progress; it plus the previous word (text) |
+| C1, C2 | byte classes of the last bytes (the MDBE flags: letter, digit, space, punctuation, UTF-8…), learned, plus column |
+| E | grid views (above) |
+| B1, B2 | long match: the most recent earlier place the last 5+ bytes occurred, found with a hash index over up to 16 MB of history |
+
+Context statistics live in one shared table (`--table-bits`, default 22 =
+32 MB) of adaptive probabilities with 16-bit collision checks in buckets of
+four. Three mixers with float weights (negative allowed) combine the votes,
+each with its own weight sets chosen by: match state × bit position,
+previous byte, winning grid view × bit position. A final mixer blends
+those, and two APM stages (order 0, order 1) refine the result. The coder
+works with 16-bit probabilities. On a 300 KB mix of licenses, Python source,
+HTML and markdown this is about 20% smaller than `xz -9e`.
+
+A memory file holds the table, the history, the mixers and the APMs: about
+36 MB by default, about 6 MB with `--table-bits 18` (fine for a few hundred
+KB of training text).
 
 ---
 

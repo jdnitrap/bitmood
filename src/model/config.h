@@ -19,10 +19,14 @@ struct View;
 
 struct Config {
   DataType type = DataType::Text;
-  bool grid = true;  // grid views on (off only for A/B comparison)
+  bool grid = true;        // grid views on (off only for A/B comparison)
+  int table_bits = 22;     // shared context table: 2^bits slots of 8 bytes
+  int history_bits = 24;   // bytes of history kept for long match: 2^bits
 
   // The grid views this type starts with.
   std::vector<View> views() const;
+  // Word specialist (text only).
+  bool words() const { return type == DataType::Text; }
 };
 
 }  // namespace cmix

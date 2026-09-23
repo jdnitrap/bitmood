@@ -102,32 +102,14 @@ GridCell grid_cell(const View& v, const History& h, const Stream& s) {
 
 // ---- Grid specialist --------------------------------------------------------
 
-Grid::Grid(std::vector<View> views) : views_(std::move(views)), table_(21, 1023) {}
-
-void Grid::keys(const History& h, const Stream& s, BitPos bp, uint32_t* out) const {
+void Grid::contexts(const History& h, const Stream& s, uint64_t* out) const {
   for (int i = 0; i < num_views(); ++i) {
     const GridCell c = grid_cell(views_[i], h, s);
-    const uint32_t id = (uint32_t)i + (c.valid ? 0 : 0x80);
-    uint32_t k1 = hash_mix(0xE1000000u + id, (uint32_t)c.above);
-    k1 = hash_mix(k1, (uint32_t)c.above_right);
-    out[2 * i] = hash_mix(k1, bp.key());
-    uint32_t k2 = hash_mix(0xE2000000u + id, (uint32_t)c.above);
-    k2 = hash_mix(k2, (uint32_t)(s.last_byte + 1));
-    k2 = hash_mix(k2, (uint32_t)c.col);
-    out[2 * i + 1] = hash_mix(k2, bp.key());
+    const uint64_t id = (uint64_t)i + (c.valid ? 0 : 0x80);
+    out[2 * i] = hash_add(hash_add(0xE1000000ull + id, (uint64_t)c.above), (uint64_t)c.above_right);
+    out[2 * i + 1] =
+        hash_add(hash_add(hash_add(0xE2000000ull + id, (uint64_t)c.above), (uint64_t)(s.last_byte + 1)), (uint64_t)c.col);
   }
-}
-
-void Grid::predict(const History& h, const Stream& s, BitPos bp, int* out) const {
-  uint32_t k[64];
-  keys(h, s, bp, k);
-  for (int i = 0; i < num_inputs(); ++i) out[i] = table_.predict(k[i]);
-}
-
-void Grid::learn(const History& h, const Stream& s, BitPos bp, int bit) {
-  uint32_t k[64];
-  keys(h, s, bp, k);
-  for (int i = 0; i < num_inputs(); ++i) table_.learn(k[i], bit);
 }
 
 }  // namespace cmix

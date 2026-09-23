@@ -18,7 +18,6 @@
 
 #include "core/serial.h"
 #include "model/history.h"
-#include "model/specialists.h"
 #include "model/stream.h"
 #include "model/width_finder.h"
 
@@ -50,22 +49,20 @@ GridCell grid_cell(const View& v, const History& h, const Stream& s);
 // The grid specialist: two votes per view.
 //   vote 1: (byte above, byte above-right)       - vertical pattern
 //   vote 2: (byte above, byte to the left, col)   - pattern within the row
+// It only describes the contexts; their statistics live in the model's
+// shared ContextTable like every other context specialist.
 class Grid {
  public:
-  explicit Grid(std::vector<View> views);
+  explicit Grid(std::vector<View> views) : views_(std::move(views)) {}
   int num_views() const { return (int)views_.size(); }
   int num_inputs() const { return 2 * num_views(); }
   const View& view(int i) const { return views_[i]; }
 
-  void predict(const History& h, const Stream& s, BitPos bp, int* out) const;
-  void learn(const History& h, const Stream& s, BitPos bp, int bit);
-  void save(Writer& w) const { table_.save(w); }
-  void load(Reader& r) { table_.load(r); }
+  // Byte-level context hashes, two per view (the caller adds the bit position).
+  void contexts(const History& h, const Stream& s, uint64_t* out) const;
 
  private:
-  void keys(const History& h, const Stream& s, BitPos bp, uint32_t* out) const;
   std::vector<View> views_;
-  CountTable table_;
 };
 
 }  // namespace cmix

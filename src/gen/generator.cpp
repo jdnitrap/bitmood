@@ -67,6 +67,12 @@ void for_each_node(F f) {
 
 }  // namespace
 
+double Generator::satisfaction() const {
+  double s = 0;
+  for (const auto& c : constraints_) s += c->satisfaction();
+  return s;
+}
+
 void Generator::distribution(ByteProbs& p) const {
   double wsum = 0;
   for (const Source& s : src_) wsum += s.weight;
@@ -77,7 +83,7 @@ void Generator::distribution(ByteProbs& p) const {
     for_each_node([&](int id, BitPos bp) {
       double z = 0;
       for (const Source& s : src_) z += s.weight / wsum * stretch(s.model->predict(s.stream, bp, v));
-      node[id] = squash((int)std::lround(z)) / 4096.0;
+      node[id] = squash((float)z);
     });
     bytes_from_nodes(node, p);
     return;
@@ -86,7 +92,7 @@ void Generator::distribution(ByteProbs& p) const {
   ByteProbs one;
   for (const Source& s : src_) {
     if (s.weight <= 0) continue;
-    for_each_node([&](int id, BitPos bp) { node[id] = s.model->predict(s.stream, bp, v) / 4096.0; });
+    for_each_node([&](int id, BitPos bp) { node[id] = s.model->predict(s.stream, bp, v) / 65536.0; });
     bytes_from_nodes(node, one);
     for (int c = 0; c < 256; ++c) p[c] += s.weight / wsum * one[c];
   }

@@ -6,16 +6,14 @@ namespace cmix {
 
 namespace {
 
+// Stretch of the centre of each 1/4096-wide probability bucket.
 struct StretchTable {
-  int tab[4096];
+  float tab[4096];
   StretchTable() {
-    for (int i = 1; i < 4095; ++i) {
-      double pr = i / 4095.0;
-      double s = std::log(pr / (1.0 - pr));
-      tab[i] = clampi((int)std::lround(s * 256.0), -2047, 2047);
+    for (int i = 0; i < 4096; ++i) {
+      double p = (i + 0.5) / 4096.0;
+      tab[i] = (float)std::log(p / (1.0 - p));
     }
-    tab[0] = -2047;
-    tab[4095] = 2047;
   }
 };
 
@@ -26,18 +24,17 @@ const StretchTable& stretch_table() {
 
 }  // namespace
 
-int stretch(int p) { return stretch_table().tab[clampi(p, 1, 4094)]; }
+float stretch(int p) { return stretch_table().tab[clampi(p, kProbMin, kProbMax) >> 4]; }
 
-int squash(int z) {
-  double x = z / 256.0;
-  if (x > 20) return 4094;
-  if (x < -20) return 1;
-  double p = 1.0 / (1.0 + std::exp(-x));
-  return clampi((int)std::lround(p * 4095.0), 1, 4094);
+float squash(float x) {
+  x = clampf(x, -30.0f, 30.0f);
+  return 1.0f / (1.0f + std::exp(-x));
 }
 
+int to_p16(float p) { return clampi((int)std::lround(p * (float)kProbOne), kProbMin, kProbMax); }
+
 double bit_cost(int p, int bit) {
-  double q = clampi(p, 1, 4094) / 4096.0;
+  double q = clampi(p, kProbMin, kProbMax) / (double)kProbOne;
   return -std::log2(bit ? q : 1.0 - q);
 }
 

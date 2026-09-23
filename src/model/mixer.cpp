@@ -6,29 +6,25 @@
 
 namespace cmix {
 
-Mixer::Mixer(const std::vector<int>& init, int sets) : n_((int)init.size()), sets_(sets) {
-  for (int s = 0; s < sets_; ++s) w_.insert(w_.end(), init.begin(), init.end());
+Mixer::Mixer(int inputs, int sets, float init_weight)
+    : n_(inputs), sets_(sets), w_((size_t)inputs * sets, init_weight) {}
+
+float Mixer::dot(const float* x, int set) const {
+  const float* w = &w_[(size_t)set * n_];
+  float z = 0;
+  for (int i = 0; i < n_; ++i) z += w[i] * x[i];
+  return z;
 }
 
-int Mixer::mix(const int* p, int set) const {
-  const int32_t* w = &w_[(size_t)set * n_];
-  int z = 0;
-  for (int i = 0; i < n_; ++i) z += (w[i] * stretch(p[i])) >> 7;
-  return squash(z);
-}
-
-void Mixer::learn(const int* p, int bit, int mixed, int set) {
-  int32_t* w = &w_[(size_t)set * n_];
-  int err = (bit ? 4095 : 0) - mixed;
-  for (int i = 0; i < n_; ++i) {
-    int g = (err * stretch(p[i])) >> 16;
-    w[i] = clampi(w[i] + g, 1, 1024);
-  }
+void Mixer::learn(const float* x, int set, float err, float lr) {
+  float* w = &w_[(size_t)set * n_];
+  const float g = err * lr;
+  for (int i = 0; i < n_; ++i) w[i] = clampf(w[i] + g * x[i], -16.0f, 16.0f);
 }
 
 void Mixer::load(Reader& r) {
   size_t n = w_.size();
-  r.vec_i32(w_);
+  r.vec_f32(w_);
   if (w_.size() != n) throw std::runtime_error("state file: mixer size mismatch");
 }
 

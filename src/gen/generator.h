@@ -72,6 +72,8 @@ class Generator {
   void reseed(uint64_t seed) { rng_.seed(seed); }
   // True if the constraints say output can't end here (e.g. mid UTF-8).
   bool must_continue() const;
+  // Sum of the constraints' satisfaction() (best-of-N scoring).
+  double satisfaction() const;
 
   // Blended model probabilities for the next byte, before any constraint.
   void distribution(ByteProbs& p) const;

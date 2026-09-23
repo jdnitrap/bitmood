@@ -15,6 +15,7 @@ namespace cmix {
 struct LineState {
   int col = 0;           // bytes since the last newline
   int line = 0;          // lines finished so far
+  int prev_len = 0;      // length of the previous line
   std::string word;      // letters of the word in progress (lowercase ASCII)
   std::string last_word; // last finished word on this line
   void accept(uint8_t b);
@@ -86,22 +87,25 @@ class WordListFilter : public Constraint {
   bool free_ = false;  // word in progress is not in the list (came from the prompt)
 };
 
-// Rough rhyme, AABB: the second line of each pair may only end when its last
-// word ends like the first line's (last two letters), and once such a word
-// is finished past column `min_col`, the line ends there. Soft, and gives up
-// after `give_up` columns so a line can't run forever.
+// Rough rhyme, AABB. On the second line of each pair, as soon as a word
+// ending like the first line's last word (last two letters) is finished
+// past column `min_col`, the line ends there. It never forbids ending a
+// line (that only pushes the model into text it doesn't believe); instead
+// satisfaction() tells best-of-N which candidate lines rhymed, so
+// `--rhyme --best-of N` picks rhyming lines out of natural ones.
 class RhymeFilter : public Constraint {
  public:
-  explicit RhymeFilter(int min_col = 20, int give_up = 120) : min_col_(min_col), give_up_(give_up) {}
+  explicit RhymeFilter(int min_col = 20) : min_col_(min_col) {}
   std::unique_ptr<Constraint> clone() const override { return std::make_unique<RhymeFilter>(*this); }
   void restrict(ByteMask& allowed) const override;
   void accept(uint8_t b) override;
   bool soft() const override { return true; }
   int priority() const override { return 20; }
+  double satisfaction() const override { return score_; }
 
  private:
   int min_col_;
-  int give_up_;
+  double score_ = 0;  // +1 per second line that rhymed, -1 per one that didn't
   LineState st_;
   std::string target_;  // ending the current line must match (empty = free line)
 };

@@ -13,7 +13,7 @@ void usage() {
                "  cmix-bit compress   <in> <out.cmxb>\n"
                "  cmix-bit decompress <in.cmxb> <out>\n"
                "  cmix-bit demo       [text]\n"
-               "  cmix-bit train      --state <memory.bin> [--type text] <file>...\n"
+               "  cmix-bit train      --state <memory.bin> [--type text] [--table-bits 16..28] <file>...\n"
                "  cmix-bit generate   <nbytes> [prompt] [--state memory.bin]... [--blend w1,w2,..] [--blend-mode mix|product]\n"
                "                      [--temp T] [--top-p P] [--top-k K] [--seed N]\n"
                "                      [--charset seen|utf8|ascii|any] [--novelty N]\n"

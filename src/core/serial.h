@@ -26,13 +26,25 @@ class Writer {
   void vec_u16(const std::vector<uint16_t>& v) { u64(v.size()); for (uint16_t x : v) u16(x); }
   void vec_i32(const std::vector<int32_t>& v) { u64(v.size()); for (int32_t x : v) i32(x); }
   void vec_f32(const std::vector<float>& v) { u64(v.size()); for (float x : v) f32(x); }
+  // Bulk array of 16-bit values (big tables), length-prefixed.
+  void u16_array(const uint16_t* p, size_t n) {
+    u64(n);
+    std::vector<uint8_t> tmp(n * 2);
+    for (size_t i = 0; i < n; ++i) {
+      tmp[2 * i] = (uint8_t)p[i];
+      tmp[2 * i + 1] = (uint8_t)(p[i] >> 8);
+    }
+    put(tmp.data(), tmp.size());
+  }
   const std::vector<uint8_t>& data() const { return buf_; }
   uint64_t checksum() const { return sum_; }
 
  private:
   void put(const void* p, size_t n) {
     const uint8_t* b = (const uint8_t*)p;
-    for (size_t i = 0; i < n; ++i) sum_ = (sum_ ^ b[i]) * 0x100000001b3ull;
+    uint64_t s = sum_;
+    for (size_t i = 0; i < n; ++i) s = (s ^ b[i]) * 0x100000001b3ull;
+    sum_ = s;
     buf_.insert(buf_.end(), b, b + n);
   }
   std::vector<uint8_t> buf_;
@@ -60,6 +72,13 @@ class Reader {
   void vec_u16(std::vector<uint16_t>& v) { v.resize(count(2)); for (auto& x : v) x = u16(); }
   void vec_i32(std::vector<int32_t>& v) { v.resize(count(4)); for (auto& x : v) x = i32(); }
   void vec_f32(std::vector<float>& v) { v.resize(count(4)); for (auto& x : v) x = f32(); }
+  // Reads a length-prefixed 16-bit array that must have exactly n values.
+  void u16_array(uint16_t* p, size_t n) {
+    if (u64() != n) throw std::runtime_error("state file: table size mismatch");
+    std::vector<uint8_t> tmp(n * 2);
+    get(tmp.data(), tmp.size());
+    for (size_t i = 0; i < n; ++i) p[i] = (uint16_t)(tmp[2 * i] | (tmp[2 * i + 1] << 8));
+  }
   // Vector read that must match an expected length (table sizes are fixed by config).
   void vec_u16_exact(std::vector<uint16_t>& v, size_t n) {
     vec_u16(v);
@@ -77,7 +96,9 @@ class Reader {
   void get(void* p, size_t n) {
     if (n > remaining()) throw std::runtime_error("state file: truncated");
     std::memcpy(p, p_ + pos_, n);
-    for (size_t i = 0; i < n; ++i) sum_ = (sum_ ^ p_[pos_ + i]) * 0x100000001b3ull;
+    uint64_t s = sum_;
+    for (size_t i = 0; i < n; ++i) s = (s ^ p_[pos_ + i]) * 0x100000001b3ull;
+    sum_ = s;
     pos_ += n;
   }
   const uint8_t* p_;

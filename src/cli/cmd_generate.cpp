@@ -39,6 +39,8 @@ int cmd_generate(int argc, char** argv, int start) {
     bo.candidates = (int)best_of;
     const double t = gen.training_bits_per_byte();
     if (t > 0) bo.target_bpb = t;
+    if (!setup.models.empty() && setup.models[0]->history().size() > 0)
+      bo.typical_len = typical_line_length(setup.models[0]->history().data());
     uint64_t unit = 0;
     while ((long long)gen.output().size() < n) {
       Candidate c = best_of_line(gen, bo, setup.training, opt.seed, unit++);

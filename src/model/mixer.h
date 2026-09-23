@@ -1,9 +1,10 @@
-// Logistic mixer: weighted sum of stretched specialist votes, squashed back
-// to a probability. Weights are learned online, one small step per bit.
+// Logistic mixer: p = squash(sum of w_i * x_i), where x_i are the
+// specialists' votes in stretch space. Weights are floats and may go
+// negative (a specialist that is reliably wrong becomes useful inverted).
 //
-// A mixer can hold several weight sets; the caller picks one per bit
-// (for example "which grid view is winning right now"), so different
-// regions of a file learn different trust in each specialist.
+// A mixer holds several weight sets; the caller picks one per bit with a
+// selector (for example match state, or which grid view is winning), so
+// each situation learns its own trust in each specialist.
 #pragma once
 
 #include <vector>
@@ -14,19 +15,20 @@ namespace cmix {
 
 class Mixer {
  public:
-  // init[i] is the starting weight of input i in every set (128 = 1.0).
-  Mixer(const std::vector<int>& init, int sets = 1);
-  int size() const { return n_; }
+  Mixer(int inputs, int sets, float init_weight);
+  int inputs() const { return n_; }
   int sets() const { return sets_; }
-  int mix(const int* p, int set) const;
-  void learn(const int* p, int bit, int mixed, int set);
-  int weight(int i, int set = 0) const { return w_[(size_t)set * n_ + i]; }
-  void save(Writer& w) const { w.vec_i32(w_); }
+  // Dot product in stretch space (before squash).
+  float dot(const float* x, int set) const;
+  // err = bit - p (p in 0..1). lr is the learning rate.
+  void learn(const float* x, int set, float err, float lr);
+  float weight(int i, int set) const { return w_[(size_t)set * n_ + i]; }
+  void save(Writer& w) const { w.vec_f32(w_); }
   void load(Reader& r);
 
  private:
   int n_, sets_;
-  std::vector<int32_t> w_;  // sets_ x n_, 128 = weight 1.0, kept in 1..1024
+  std::vector<float> w_;
 };
 
 }  // namespace cmix
