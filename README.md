@@ -17,10 +17,23 @@ Build the prototype:
 
 ```
 make
+make test                                   # end-to-end checks
 ./cmix-bit demo "Hello mixer"
 ./cmix-bit compress in.txt out.cmxb
 ./cmix-bit decompress out.cmxb out.txt
 ```
+
+Saved memory and generation:
+
+```
+./cmix-bit train --state brain.bin notes.txt more.txt    # learns; keeps learning if brain.bin exists
+./cmix-bit info brain.bin
+./cmix-bit generate 300 "The " --state brain.bin --temp 0.8 --seed 42
+```
+
+`generate` never learns from its own output and never changes the memory
+file. With `--state` the prompt only sets the context; without it the prompt
+is the only thing the model learns from.
 
 ---
 
