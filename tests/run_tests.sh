@@ -75,6 +75,33 @@ k1=$($BIN generate 100 "The " --state "$T/one.st" --top-k 1 --seed 1 | md5sum)
 k2=$($BIN generate 100 "The " --state "$T/one.st" --top-k 1 --seed 2 | md5sum)
 check "--top-k 1 is greedy (seed does not matter)" "[ '$k1' = '$k2' ]"
 
+echo "creativity controls"
+$BIN train --state "$T/code.st" Makefile tests/run_tests.sh 2>/dev/null
+s1=$($BIN generate 200 "The " --state "$T/one.st" --charset any --seed 3 | md5sum)
+s2=$($BIN generate 200 "The " --state "$T/one.st" --state "$T/code.st" --blend 1,0 --charset any --seed 3 | md5sum)
+check "--blend 1,0 equals the first memory alone" "[ '$s1' = '$s2' ]"
+s3=$($BIN generate 200 "The " --state "$T/one.st" --state "$T/code.st" --blend 0.5,0.5 --charset any --seed 3 | md5sum)
+check "--blend 0.5,0.5 differs from one memory" "[ '$s1' != '$s3' ]"
+check "--blend-mode product runs" "$BIN generate 50 'The ' --state '$T/one.st' --state '$T/code.st' --blend-mode product >/dev/null"
+check "blending text with a missing weight is rejected" "! $BIN generate 5 --state '$T/one.st' --state '$T/code.st' --blend 1 2>/dev/null"
+$BIN generate 400 "" --state "$T/one.st" --acrostic MIXER --max-line 50 --seed 2 > "$T/acro.txt"
+check "--acrostic MIXER starts lines M,I,X,E,R" "[ \"\$(head -5 '$T/acro.txt' | cut -c1 | tr -d '\n' | tr a-z A-Z)\" = MIXER ]"
+check "--max-line 50 keeps every line within 50 bytes" "! awk 'length(\$0) > 50 {bad=1} END {exit !bad}' '$T/acro.txt'"
+$BIN generate 300 "" --state "$T/one.st" --line-start "#-" --max-line 40 --seed 2 > "$T/ls.txt"
+check "--line-start '#-' starts every line with # or -" "! grep -v '^[#-]' <(grep -v '^\$' '$T/ls.txt') | grep -q ."
+printf 'the model learns bits bytes and a mixer of the text\n' > "$T/words.txt"
+$BIN generate 300 "the " --state "$T/one.st" --words "$T/words.txt" --seed 2 > "$T/w.txt"
+check "--words: every word comes from the list" "python3 - '$T/w.txt' '$T/words.txt' <<'PY'
+import re, sys
+allowed = set(open(sys.argv[2]).read().split())
+words = re.findall(r\"[A-Za-z']+\", open(sys.argv[1]).read())
+sys.exit(0 if words and all(w.lower() in allowed for w in words) else 1)
+PY"
+b1=$($BIN generate 200 "The " --state "$T/one.st" --best-of 4 --seed 6 | md5sum)
+b2=$($BIN generate 200 "The " --state "$T/one.st" --best-of 4 --seed 6 | md5sum)
+check "--best-of 4 is repeatable with the same seed" "[ '$b1' = '$b2' ]"
+check "generate still leaves the memory untouched" "cmp -s '$T/one.st' '$T/two.st'"
+
 echo "grid views"
 words=(alpha beta gamma delta)
 for i in $(seq 400); do  # 23-byte records; the word and number vary without a longer period

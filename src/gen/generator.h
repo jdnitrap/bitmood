@@ -1,8 +1,8 @@
 // Text (or byte) generator on top of one or more models.
 //
 // For each byte it asks every source model for P(bit = 1) at all 255 nodes
-// of the 8-level bit tree, blends them (weighted, in stretch space), turns
-// that into a probability for each of the 256 bytes, removes bytes the
+// of the 8-level bit tree, turns that into a probability for each of the
+// 256 bytes, blends the sources (see BlendMode), removes bytes the
 // constraints forbid, applies temperature / top-k / top-p, and samples.
 //
 // Models are never taught their own output: the chosen byte only moves each
@@ -26,7 +26,15 @@ struct Source {
   double weight = 1.0;
 };
 
+// How several memories are combined.
+//   Mix     - weighted average of their byte distributions: each model's
+//             confident choices survive (style switching)
+//   Product - weighted average in stretch space at every bit: only what
+//             they agree on stays likely (style compromise)
+enum class BlendMode { Mix, Product };
+
 struct GenOptions {
+  BlendMode blend = BlendMode::Mix;
   double temp = 1.0;   // < 1 sharper, > 1 flatter
   double top_p = 1.0;  // keep the smallest set of bytes whose probability sums to top_p
   int top_k = 0;       // keep only the k most likely bytes (0 = off)
@@ -47,8 +55,15 @@ class Generator {
     for (uint8_t b : bytes)
       for (auto& c : constraints_) c->accept(b);
   }
+  void begin_output() {
+    for (auto& c : constraints_) c->begin_output();
+  }
   // Samples, emits and returns the next byte.
   uint8_t next();
+  // Emits a byte chosen elsewhere (replaying a best-of-N winner); `bits` is its model cost.
+  void emit(uint8_t b, double bits);
+  // New random stream (each best-of-N candidate gets its own).
+  void reseed(uint64_t seed) { rng_.seed(seed); }
   // True if the constraints say output can't end here (e.g. mid UTF-8).
   bool must_continue() const;
 
@@ -61,6 +76,10 @@ class Generator {
   // Average -log2 P(chosen byte) under the blended model: how surprising the
   // output is to the model itself.
   double bits_per_byte() const { return out_.empty() ? 0.0 : bits_ / (double)out_.size(); }
+  double total_bits() const { return bits_; }
+  // Recent bits/byte the source models spent on their training text:
+  // how surprising real text is to them once trained.
+  double training_bits_per_byte() const;
 
   // Everything needed to roll generation back (best-of-N).
   struct Snapshot {

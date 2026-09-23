@@ -50,7 +50,8 @@ int cmd_info(int argc, char** argv, int start) {
   auto m = load_state(a.pos()[0], st);
   std::printf("type           %s\n", type_name(m->config().type));
   std::printf("bytes learned  %llu\n", (unsigned long long)m->bytes_learned);
-  std::printf("bits/byte      %.3f (average while learning)\n", bpb(m->bits_spent, m->bytes_learned));
+  std::printf("bits/byte      %.3f average while learning, %.3f recently\n", bpb(m->bits_spent, m->bytes_learned),
+              m->recent_bpb);
   std::printf("history        %zu bytes kept\n", m->history().size());
   std::printf("mixer weights ");
   for (int i = 0; i < m->mixer().size(); ++i)

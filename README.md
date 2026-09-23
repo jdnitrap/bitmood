@@ -47,6 +47,26 @@ bytes, then filters and sampling settings apply:
 | `--novelty N` | never copy more than N bytes in a row from the training text *or* from its own earlier output (stops loops) |
 | `--stats` | print model surprise (bits/byte) and the longest run copied from the training text |
 
+With a small or very repetitive memory, a low `--novelty` forbids almost
+everything the model believes and the output turns to noise; raise it.
+
+Creativity controls:
+
+| Option | Effect |
+|---|---|
+| `--state a.bin --state b.bin --blend 0.7,0.3` | write from several memories at once |
+| `--blend-mode mix` | (default) weighted average of the memories' byte probabilities: each keeps its confident choices, so styles alternate |
+| `--blend-mode product` | average in stretch space per bit: only what the memories agree on stays likely |
+| `--line-start CHARS` | every line starts with one of CHARS |
+| `--acrostic WORD` | line *i* starts with letter *i* of WORD |
+| `--max-line N` | lines end by column N |
+| `--words FILE` | only words from FILE (between words: spaces and ordinary punctuation) |
+| `--rhyme` | rough AABB rhyme: the second line of a pair ends on a word ending like the first's |
+| `--best-of N` | write N candidate lines, keep the one whose surprise is closest to real text's, with no nonsense spikes and no long copies |
+
+Soft rules are relaxed in order when they conflict: novelty first, then
+rhyme, then line length. Charset, line start, acrostic and word list never are.
+
 Grid views (the ImHex idea) and file comparison:
 
 ```

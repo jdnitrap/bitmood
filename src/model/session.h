@@ -35,6 +35,7 @@ class Session {
   Stream s_;
   BitPos bp_;
   Model::Votes v_;
+  double byte_bits_ = 0;  // cost of the byte in progress while learning
 };
 
 }  // namespace cmix

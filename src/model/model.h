@@ -8,6 +8,7 @@
 // forward through its own output without teaching itself that output.
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -71,6 +72,11 @@ class Model {
   // Running totals over everything this model has learned from.
   uint64_t bytes_learned = 0;
   double bits_spent = 0;  // sum of -log2 P(real bit) while learning
+  double recent_bpb = 0;  // bits/byte over roughly the last 4096 bytes learned
+  void note_byte_cost(double bits) {
+    const double rate = std::max(1.0 / 4096.0, 1.0 / (double)(bytes_learned + 1));
+    recent_bpb += rate * (bits - recent_bpb);
+  }
 
   void save(Writer& w) const;
   void load(Reader& r);

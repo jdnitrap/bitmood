@@ -15,7 +15,12 @@ double Session::learn_bit(int bit) {
   double cost = bit_cost(v_.mixed, bit);
   m_.learn(s_, bp_, v_, bit);
   m_.bits_spent += cost;
-  if (bp_.index == 7) ++m_.bytes_learned;
+  byte_bits_ += cost;
+  if (bp_.index == 7) {
+    m_.note_byte_cost(byte_bits_);
+    ++m_.bytes_learned;
+    byte_bits_ = 0;
+  }
   next(bit);
   return cost;
 }

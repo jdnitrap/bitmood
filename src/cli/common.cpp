@@ -3,6 +3,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "gen/shape.h"
 #include "io/files.h"
 #include "io/state.h"
 #include "model/session.h"
@@ -79,6 +80,10 @@ GenSetup load_sources(const Args& a, const std::string& prompt, bool need_traini
 
 GenOptions gen_options(const Args& a) {
   GenOptions o;
+  const std::string mode = a.str("blend-mode", "mix");
+  if (mode == "mix") o.blend = BlendMode::Mix;
+  else if (mode == "product") o.blend = BlendMode::Product;
+  else throw std::runtime_error("--blend-mode must be mix or product");
   o.temp = a.num("temp", 1.0);
   o.top_p = a.num("top-p", 1.0);
   o.top_k = (int)a.integer("top-k", 0);
@@ -98,5 +103,23 @@ void add_standard_constraints(Generator& g, const Args& a, const GenSetup& setup
   if (novelty < 0) throw std::runtime_error("--novelty must be >= 0");
   if (novelty > 0) g.add_constraint(std::make_unique<NoveltyFilter>(setup.training, (int)novelty));
 }
+
+void add_shape_constraints(Generator& g, const Args& a) {
+  if (a.has("line-start") && a.has("acrostic")) throw std::runtime_error("use --line-start or --acrostic, not both");
+  if (a.has("line-start")) g.add_constraint(std::make_unique<LineStartFilter>(a.str("line-start"), false));
+  if (a.has("acrostic")) g.add_constraint(std::make_unique<LineStartFilter>(a.str("acrostic"), true));
+  if (a.has("max-line")) {
+    long long n = a.integer("max-line", 0);
+    if (n < 1) throw std::runtime_error("--max-line must be >= 1");
+    g.add_constraint(std::make_unique<MaxLineFilter>((int)n));
+  }
+  if (a.has("words")) g.add_constraint(std::make_unique<WordListFilter>(WordListFilter::load(a.str("words"))));
+  if (a.has("rhyme")) g.add_constraint(std::make_unique<RhymeFilter>());
+}
+
+const std::set<std::string> kGenValued = {"state",   "blend",      "blend-mode", "temp",     "top-p",    "top-k",
+                                          "seed",    "charset",    "novelty",  "line-start", "acrostic",
+                                          "max-line", "words",     "best-of"};
+const std::set<std::string> kGenFlags = {"stats", "rhyme"};
 
 }  // namespace cmix

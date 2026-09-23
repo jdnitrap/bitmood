@@ -14,9 +14,11 @@ void usage() {
                "  cmix-bit decompress <in.cmxb> <out>\n"
                "  cmix-bit demo       [text]\n"
                "  cmix-bit train      --state <memory.bin> [--type text] <file>...\n"
-               "  cmix-bit generate   <nbytes> [prompt] [--state memory.bin]... [--blend w1,w2,..]\n"
+               "  cmix-bit generate   <nbytes> [prompt] [--state memory.bin]... [--blend w1,w2,..] [--blend-mode mix|product]\n"
                "                      [--temp T] [--top-p P] [--top-k K] [--seed N]\n"
-               "                      [--charset seen|utf8|ascii|any] [--novelty N] [--stats]\n"
+               "                      [--charset seen|utf8|ascii|any] [--novelty N]\n"
+               "                      [--line-start CHARS | --acrostic WORD] [--max-line N]\n"
+               "                      [--words FILE] [--rhyme] [--best-of N] [--stats]\n"
                "  cmix-bit info       <memory.bin>\n"
                "  cmix-bit compare    [--type text] <fileA> <fileB>\n";
 }

@@ -134,6 +134,7 @@ void Model::save(Writer& w) const {
   w.tag("STAT");
   w.u64(bytes_learned);
   w.f64(bits_spent);
+  w.f64(recent_bpb);
 }
 
 void Model::load(Reader& r) {
@@ -153,6 +154,7 @@ void Model::load(Reader& r) {
   r.expect_tag("STAT");
   bytes_learned = r.u64();
   bits_spent = r.f64();
+  recent_bpb = r.f64();
 }
 
 }  // namespace cmix

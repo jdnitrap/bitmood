@@ -2,6 +2,7 @@
 #pragma once
 
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -31,10 +32,17 @@ struct GenSetup {
 // array over every memory's history before the prompt is added.
 GenSetup load_sources(const Args& a, const std::string& prompt, bool need_training_text);
 
-// --temp, --top-p, --top-k, --seed.
+// --blend-mode, --temp, --top-p, --top-k, --seed.
 GenOptions gen_options(const Args& a);
 
 // --charset (default seen) and --novelty N.
 void add_standard_constraints(Generator& g, const Args& a, const GenSetup& setup);
+
+// --line-start CHARS, --acrostic WORD, --max-line N, --words FILE, --rhyme.
+void add_shape_constraints(Generator& g, const Args& a);
+
+// Option names used by the commands that generate.
+extern const std::set<std::string> kGenValued;
+extern const std::set<std::string> kGenFlags;
 
 }  // namespace cmix

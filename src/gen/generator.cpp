@@ -37,46 +37,79 @@ bool Generator::must_continue() const {
   return false;
 }
 
-void Generator::distribution(ByteProbs& p) const {
-  double wsum = 0;
-  for (const Source& s : src_) wsum += s.weight;
-  if (!(wsum > 0)) throw std::runtime_error("blend weights must sum to more than 0");
-  // node[(1 << depth) | partial] = P(next bit = 1) after `partial` (depth bits).
-  double node[256];
-  Model::Votes v;
-  for (int depth = 0; depth < 8; ++depth) {
-    for (int partial = 0; partial < (1 << depth); ++partial) {
-      BitPos bp;
-      bp.index = depth;
-      bp.partial = partial;
-      double z = 0;
-      for (const Source& s : src_) z += s.weight / wsum * stretch(s.model->predict(s.stream, bp, v));
-      node[(1 << depth) | partial] = squash((int)std::lround(z)) / 4096.0;
-    }
-  }
+namespace {
+
+// node[(1 << depth) | partial] = P(next bit = 1) after `partial` (depth bits)
+// -> probability of each of the 256 bytes.
+void bytes_from_nodes(const double* node, ByteProbs& p) {
   for (int c = 0; c < 256; ++c) {
     double q = 1.0;
     for (int depth = 0; depth < 8; ++depth) {
-      const int partial = c >> (8 - depth);
-      const double p1 = node[(1 << depth) | partial];
+      const double p1 = node[(1 << depth) | (c >> (8 - depth))];
       q *= ((c >> (7 - depth)) & 1) ? p1 : 1.0 - p1;
     }
     p[c] = q;
   }
 }
 
+// Calls f(depth, partial, BitPos) for all 255 nodes of the bit tree.
+template <class F>
+void for_each_node(F f) {
+  for (int depth = 0; depth < 8; ++depth)
+    for (int partial = 0; partial < (1 << depth); ++partial) {
+      BitPos bp;
+      bp.index = depth;
+      bp.partial = partial;
+      f((1 << depth) | partial, bp);
+    }
+}
+
+}  // namespace
+
+void Generator::distribution(ByteProbs& p) const {
+  double wsum = 0;
+  for (const Source& s : src_) wsum += s.weight;
+  if (!(wsum > 0)) throw std::runtime_error("blend weights must sum to more than 0");
+  double node[256];
+  Model::Votes v;
+  if (opt_.blend == BlendMode::Product && src_.size() > 1) {
+    for_each_node([&](int id, BitPos bp) {
+      double z = 0;
+      for (const Source& s : src_) z += s.weight / wsum * stretch(s.model->predict(s.stream, bp, v));
+      node[id] = squash((int)std::lround(z)) / 4096.0;
+    });
+    bytes_from_nodes(node, p);
+    return;
+  }
+  p.fill(0.0);
+  ByteProbs one;
+  for (const Source& s : src_) {
+    if (s.weight <= 0) continue;
+    for_each_node([&](int id, BitPos bp) { node[id] = s.model->predict(s.stream, bp, v) / 4096.0; });
+    bytes_from_nodes(node, one);
+    for (int c = 0; c < 256; ++c) p[c] += s.weight / wsum * one[c];
+  }
+}
+
 ByteMask Generator::allowed() const {
-  ByteMask all;
-  all.fill(true);
-  ByteMask hard = all;
+  auto any = [](const ByteMask& m) { return std::any_of(m.begin(), m.end(), [](bool b) { return b; }); };
+  ByteMask mask;
+  mask.fill(true);
   for (const auto& c : constraints_)
-    if (!c->soft()) c->restrict(hard);
-  ByteMask both = hard;
+    if (!c->soft()) c->restrict(mask);
+  if (!any(mask)) throw std::runtime_error("the constraints leave no byte that may come next");
+  std::vector<const Constraint*> soft;
   for (const auto& c : constraints_)
-    if (c->soft()) c->restrict(both);
-  if (std::any_of(both.begin(), both.end(), [](bool b) { return b; })) return both;
-  if (std::any_of(hard.begin(), hard.end(), [](bool b) { return b; })) return hard;
-  throw std::runtime_error("the constraints leave no byte that may come next");
+    if (c->soft()) soft.push_back(c.get());
+  std::stable_sort(soft.begin(), soft.end(), [](const Constraint* a, const Constraint* b) {
+    return a->priority() > b->priority();
+  });
+  for (const Constraint* c : soft) {
+    ByteMask trial = mask;
+    c->restrict(trial);
+    if (any(trial)) mask = trial;
+  }
+  return mask;
 }
 
 uint8_t Generator::next() {
@@ -115,6 +148,23 @@ uint8_t Generator::next() {
   return (uint8_t)chosen;
 }
 
+void Generator::emit(uint8_t b, double bits) {
+  bits_ += bits;
+  out_.push_back(b);
+  advance(b);
+}
+
+double Generator::training_bits_per_byte() const {
+  double w = 0, sum = 0;
+  for (const Source& s : src_) {
+    const Model& m = *s.model;
+    if (m.bytes_learned == 0) continue;
+    sum += s.weight * m.recent_bpb;
+    w += s.weight;
+  }
+  return w > 0 ? sum / w : 0.0;
+}
+
 Generator::Snapshot Generator::snapshot() const {
   Snapshot s;
   for (const Source& src : src_) {
@@ -130,6 +180,8 @@ Generator::Snapshot Generator::snapshot() const {
 
 void Generator::restore(const Snapshot& s) {
   for (size_t i = 0; i < src_.size(); ++i) {
+    if (s.hist_end[i] < src_[i].model->history().base())
+      throw std::runtime_error("generation ran past the history room; cannot roll back");
     src_[i].stream = s.streams[i];
     src_[i].model->history().truncate_to(s.hist_end[i]);
   }
