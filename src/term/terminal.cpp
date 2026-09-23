@@ -23,11 +23,12 @@ RawTerminal::RawTerminal() : saved_(new Saved) {
   raw.c_iflag &= ~(tcflag_t)(IXON | ICRNL);
   raw.c_cc[VMIN] = 1;
   raw.c_cc[VTIME] = 0;
-  tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+  // TCSANOW, not TCSAFLUSH: keys typed while the memory was loading are kept.
+  tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 }
 
 RawTerminal::~RawTerminal() {
-  tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved_->orig);
+  tcsetattr(STDIN_FILENO, TCSADRAIN, &saved_->orig);
   delete saved_;
 }
 

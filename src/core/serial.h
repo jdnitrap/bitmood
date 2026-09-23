@@ -41,6 +41,7 @@ class Writer {
 
  private:
   void put(const void* p, size_t n) {
+    if (n == 0) return;  // p may be null for empty data
     const uint8_t* b = (const uint8_t*)p;
     uint64_t s = sum_;
     for (size_t i = 0; i < n; ++i) s = (s ^ b[i]) * 0x100000001b3ull;
@@ -95,6 +96,7 @@ class Reader {
   }
   void get(void* p, size_t n) {
     if (n > remaining()) throw std::runtime_error("state file: truncated");
+    if (n == 0) return;  // p may be null for empty data
     std::memcpy(p, p_ + pos_, n);
     uint64_t s = sum_;
     for (size_t i = 0; i < n; ++i) s = (s ^ p_[pos_ + i]) * 0x100000001b3ull;

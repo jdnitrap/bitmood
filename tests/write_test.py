@@ -49,7 +49,10 @@ def send(keys):
     pump()
 
 
-pump(1.0)
+# Wait until write is ready (the header line is drawn), up to 60 s.
+deadline = time.time() + 60
+while b"Tab: accept" not in screen and time.time() < deadline:
+    pump(0.5)
 send(b"The ")          # finished word: learned
 send(b"\t")            # accept the whole suggestion
 send(b" mox")          # word in progress
