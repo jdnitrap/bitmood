@@ -10,5 +10,6 @@ int cmd_demo(int argc, char** argv, int start);
 int cmd_train(int argc, char** argv, int start);
 int cmd_generate(int argc, char** argv, int start);
 int cmd_info(int argc, char** argv, int start);
+int cmd_compare(int argc, char** argv, int start);
 
 }  // namespace cmix

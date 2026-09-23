@@ -115,7 +115,11 @@ int cmd_info(int argc, char** argv, int start) {
   std::printf("bits/byte      %.3f (average while learning)\n", bpb(m->bits_spent, m->bytes_learned));
   std::printf("history        %zu bytes kept\n", m->history().size());
   std::printf("mixer weights ");
-  for (int i = 0; i < m->mixer().size(); ++i) std::printf(" %s=%d", Model::input_name(i), m->mixer().weight(i));
+  for (int i = 0; i < m->mixer().size(); ++i)
+    std::printf(" %s=%d", m->input_name(i).c_str(), m->mixer().weight(i, m->best_view()));
+  std::printf("\n");
+  std::printf("grid views    ");
+  for (int v = 0; v < m->grid().num_views(); ++v) std::printf(" [%s]", view_label(m->grid().view(v), st).c_str());
   std::printf("\n");
   return 0;
 }

@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace cmix {
 
@@ -14,8 +15,14 @@ const char* type_name(DataType t);
 // Parses "text", "image", "audio", "raw". Throws on anything else.
 DataType parse_type(const std::string& s);
 
+struct View;
+
 struct Config {
   DataType type = DataType::Text;
+  bool grid = true;  // grid views on (off only for A/B comparison)
+
+  // The grid views this type starts with.
+  std::vector<View> views() const;
 };
 
 }  // namespace cmix

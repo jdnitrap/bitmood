@@ -12,6 +12,7 @@ namespace {
 void save_config(Writer& w, const Config& c) {
   w.tag("CONF");
   w.u8((uint8_t)c.type);
+  w.u8(c.grid ? 1 : 0);
 }
 
 Config load_config(Reader& r) {
@@ -20,6 +21,7 @@ Config load_config(Reader& r) {
   uint8_t t = r.u8();
   if (t > (uint8_t)DataType::Raw) throw std::runtime_error("state file: unknown data type");
   c.type = (DataType)t;
+  c.grid = r.u8() != 0;
   return c;
 }
 
@@ -28,6 +30,9 @@ void save_stream(Writer& w, const Stream& s) {
   w.i32(s.last_byte);
   for (uint32_t h : s.order_hash) w.u32(h);
   w.u64(s.bytes);
+  w.u64(s.line_start);
+  w.u64(s.prev_line_start);
+  s.widths.save(w);
 }
 
 Stream load_stream(Reader& r) {
@@ -36,6 +41,9 @@ Stream load_stream(Reader& r) {
   s.last_byte = r.i32();
   for (uint32_t& h : s.order_hash) h = r.u32();
   s.bytes = r.u64();
+  s.line_start = r.u64();
+  s.prev_line_start = r.u64();
+  s.widths.load(r);
   return s;
 }
 

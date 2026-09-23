@@ -15,7 +15,8 @@ void usage() {
                "  cmix-bit demo       [text]\n"
                "  cmix-bit train      --state <memory.bin> [--type text] <file>...\n"
                "  cmix-bit generate   <nbytes> [prompt] [--state memory.bin] [--temp T] [--seed N]\n"
-               "  cmix-bit info       <memory.bin>\n";
+               "  cmix-bit info       <memory.bin>\n"
+               "  cmix-bit compare    [--type text] <fileA> <fileB>\n";
 }
 
 struct Command {
@@ -26,6 +27,7 @@ struct Command {
 const Command kCommands[] = {
     {"compress", cmix::cmd_compress}, {"decompress", cmix::cmd_decompress}, {"demo", cmix::cmd_demo},
     {"train", cmix::cmd_train},       {"generate", cmix::cmd_generate},     {"info", cmix::cmd_info},
+    {"compare", cmix::cmd_compare},
 };
 
 }  // namespace

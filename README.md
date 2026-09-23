@@ -35,6 +35,23 @@ Saved memory and generation:
 file. With `--state` the prompt only sets the context; without it the prompt
 is the only thing the model learns from.
 
+Grid views (the ImHex idea) and file comparison:
+
+```
+./cmix-bit compare carbide_report.html README.md
+```
+
+A hex editor shows a file as rows and columns; set the column count right
+and repeating records line up as vertical stripes. Specialist **E** does
+this for the model, in several *views* at once: rows cut at newlines, and
+two row widths the model finds itself by scoring every distance 2..1024
+("how often does a byte equal the byte d back?"). Each view votes with the
+byte *above* the one being predicted. A tracker follows which view is
+predicting best right now, and each winning view gets its own mixer weight
+set, so different regions of a file learn different trust. `compare` shows
+bits per byte with and without the grid, each specialist alone, the
+segments where each view won, and whether learning one file helps the other.
+
 ---
 
 ## 1. The plain-English version

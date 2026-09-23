@@ -1,4 +1,5 @@
-// demo: print every bit's specialist votes, the mixed p, and mixer weights.
+// demo: print every bit's specialist votes, the mixed p, and which mixer
+// weight set (grid view) is active.
 #include <cstdio>
 #include <iostream>
 
@@ -14,22 +15,24 @@ int cmd_demo(int argc, char** argv, int start) {
 
   Model m{Config()};
   Session s(m);
-  std::cout << "bit  p(1)   A    B    C   D0   D1   D2   wA wB wC ...  ch\n";
+  const int n = m.num_inputs();
+  std::printf("bit  p(1) ");
+  for (int i = 0; i < n; ++i) std::printf("%5s", m.input_name(i).c_str());
+  std::printf("  set  ch\n");
   for (unsigned char ch : text) {
     for (int k = 0; k < 8; ++k) {
       int bit = (ch >> (7 - k)) & 1;
       int p = s.predict();
       const auto& v = s.votes();
-      const Mixer& mx = m.mixer();
-      std::printf("%d    %4d  %4d %4d %4d %4d %4d %4d  %3d %3d %3d     %c\n", bit, p, v.p[0], v.p[1], v.p[2],
-                  v.p[3], v.p[4], v.p[5], mx.weight(0), mx.weight(1), mx.weight(2),
-                  (k == 7 && ch >= 32 && ch < 127) ? ch : ' ');
+      std::printf("%d    %4d ", bit, p);
+      for (int i = 0; i < n; ++i) std::printf("%5d", v.p[i]);
+      std::printf("  %3d  %c\n", v.set, (k == 7 && ch >= 32 && ch < 127) ? ch : ' ');
       s.learn_bit(bit);
     }
   }
-  std::cout << "final mixer weights:";
-  for (int i = 0; i < m.mixer().size(); ++i) std::cout << " " << m.mixer().weight(i);
-  std::cout << "\n";
+  std::printf("final mixer weights (set %d):", m.best_view());
+  for (int i = 0; i < n; ++i) std::printf(" %s=%d", m.input_name(i).c_str(), m.mixer().weight(i, m.best_view()));
+  std::printf("\n");
   return 0;
 }
 
