@@ -1,0 +1,102 @@
+#include "cli/common.h"
+
+#include <sstream>
+#include <stdexcept>
+
+#include "io/files.h"
+#include "io/state.h"
+#include "model/session.h"
+
+namespace cmix {
+
+std::unique_ptr<Model> open_or_create(const std::string& path, const Args& a, Stream& s, bool& created) {
+  created = !file_exists(path);
+  if (created) {
+    Config cfg;
+    cfg.type = parse_type(a.str("type", "text"));
+    s = Stream();
+    return std::make_unique<Model>(cfg);
+  }
+  auto m = load_state(path, s);
+  if (a.has("type") && parse_type(a.str("type")) != m->config().type)
+    throw std::runtime_error(path + " is a " + type_name(m->config().type) + " memory, not " + a.str("type"));
+  return m;
+}
+
+namespace {
+
+std::vector<double> parse_blend(const std::string& s, size_t n) {
+  std::vector<double> w;
+  std::stringstream ss(s);
+  std::string item;
+  while (std::getline(ss, item, ',')) w.push_back(std::stod(item));
+  if (w.size() != n)
+    throw std::runtime_error("--blend needs one weight per --state (" + std::to_string(n) + ")");
+  for (double x : w)
+    if (x < 0) throw std::runtime_error("--blend weights must be >= 0");
+  return w;
+}
+
+}  // namespace
+
+GenSetup load_sources(const Args& a, const std::string& prompt, bool need_training_text) {
+  GenSetup g;
+  const std::vector<std::string> paths = a.all("state");
+  std::vector<double> weights(paths.size(), 1.0);
+  if (a.has("blend")) weights = parse_blend(a.str("blend"), paths.size());
+
+  if (paths.empty()) {
+    // No memory: the prompt is all the model has, so it learns from it.
+    auto m = std::make_unique<Model>(Config());
+    Session s(*m);
+    for (unsigned char ch : prompt) s.learn_byte(ch);
+    g.sources.push_back({m.get(), s.stream(), 1.0});
+    g.models.push_back(std::move(m));
+    if (need_training_text) g.training = std::make_shared<SuffixArray>(std::vector<uint8_t>());
+    return g;
+  }
+
+  std::vector<uint8_t> text;
+  for (size_t i = 0; i < paths.size(); ++i) {
+    Stream st;
+    auto m = load_state(paths[i], st);
+    if (i > 0 && m->config().type != g.models[0]->config().type)
+      throw std::runtime_error("cannot blend a " + std::string(type_name(m->config().type)) + " memory with a " +
+                               type_name(g.models[0]->config().type) + " memory");
+    if (need_training_text) {
+      text.insert(text.end(), m->history().data().begin(), m->history().data().end());
+      text.push_back(0);  // separator so no copy spans two memories
+    }
+    // With a memory the prompt only sets the context.
+    Session s(*m, st);
+    for (unsigned char ch : prompt) s.feed_byte(ch);
+    g.sources.push_back({m.get(), s.stream(), weights[i]});
+    g.models.push_back(std::move(m));
+  }
+  if (need_training_text) g.training = std::make_shared<SuffixArray>(std::move(text));
+  return g;
+}
+
+GenOptions gen_options(const Args& a) {
+  GenOptions o;
+  o.temp = a.num("temp", 1.0);
+  o.top_p = a.num("top-p", 1.0);
+  o.top_k = (int)a.integer("top-k", 0);
+  o.seed = (uint64_t)a.integer("seed", 0xC0FFEE);
+  if (!(o.temp > 0)) throw std::runtime_error("--temp must be > 0");
+  if (!(o.top_p > 0 && o.top_p <= 1)) throw std::runtime_error("--top-p must be in (0, 1]");
+  if (o.top_k < 0) throw std::runtime_error("--top-k must be >= 0");
+  return o;
+}
+
+void add_standard_constraints(Generator& g, const Args& a, const GenSetup& setup) {
+  ByteMask seen{};
+  for (const Source& s : setup.sources)
+    for (uint8_t b : s.model->history().data()) seen[b] = true;
+  g.add_constraint(std::make_unique<CharsetFilter>(CharsetFilter::parse(a.str("charset", "seen")), seen));
+  const long long novelty = a.integer("novelty", 0);
+  if (novelty < 0) throw std::runtime_error("--novelty must be >= 0");
+  if (novelty > 0) g.add_constraint(std::make_unique<NoveltyFilter>(setup.training, (int)novelty));
+}
+
+}  // namespace cmix

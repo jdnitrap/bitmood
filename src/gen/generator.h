@@ -1,0 +1,88 @@
+// Text (or byte) generator on top of one or more models.
+//
+// For each byte it asks every source model for P(bit = 1) at all 255 nodes
+// of the 8-level bit tree, blends them (weighted, in stretch space), turns
+// that into a probability for each of the 256 bytes, removes bytes the
+// constraints forbid, applies temperature / top-k / top-p, and samples.
+//
+// Models are never taught their own output: the chosen byte only moves each
+// source's context forward (Model::advance_byte).
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <memory>
+#include <random>
+#include <vector>
+
+#include "gen/constraints.h"
+#include "model/model.h"
+
+namespace cmix {
+
+struct Source {
+  Model* model;
+  Stream stream;
+  double weight = 1.0;
+};
+
+struct GenOptions {
+  double temp = 1.0;   // < 1 sharper, > 1 flatter
+  double top_p = 1.0;  // keep the smallest set of bytes whose probability sums to top_p
+  int top_k = 0;       // keep only the k most likely bytes (0 = off)
+  uint64_t seed = 0xC0FFEE;
+};
+
+using ByteProbs = std::array<double, 256>;
+
+class Generator {
+ public:
+  Generator(std::vector<Source> sources, GenOptions opt);
+
+  void add_constraint(std::unique_ptr<Constraint> c) { constraints_.push_back(std::move(c)); }
+  // Moves the context over a byte without sampling it (the prompt).
+  void feed(uint8_t b);
+  // Shows bytes to the constraints only (models already have them).
+  void feed_constraints(const std::vector<uint8_t>& bytes) {
+    for (uint8_t b : bytes)
+      for (auto& c : constraints_) c->accept(b);
+  }
+  // Samples, emits and returns the next byte.
+  uint8_t next();
+  // True if the constraints say output can't end here (e.g. mid UTF-8).
+  bool must_continue() const;
+
+  // Blended model probabilities for the next byte, before any constraint.
+  void distribution(ByteProbs& p) const;
+  // Bytes allowed next under the constraints (soft ones relaxed if needed).
+  ByteMask allowed() const;
+
+  const std::vector<uint8_t>& output() const { return out_; }
+  // Average -log2 P(chosen byte) under the blended model: how surprising the
+  // output is to the model itself.
+  double bits_per_byte() const { return out_.empty() ? 0.0 : bits_ / (double)out_.size(); }
+
+  // Everything needed to roll generation back (best-of-N).
+  struct Snapshot {
+    std::vector<Stream> streams;
+    std::vector<uint64_t> hist_end;
+    std::vector<std::unique_ptr<Constraint>> constraints;
+    std::mt19937_64 rng;
+    size_t out_size;
+    double bits;
+  };
+  Snapshot snapshot() const;
+  void restore(const Snapshot& s);
+
+ private:
+  void advance(uint8_t b);
+  double uniform();
+  std::vector<Source> src_;
+  GenOptions opt_;
+  std::vector<std::unique_ptr<Constraint>> constraints_;
+  std::mt19937_64 rng_;
+  std::vector<uint8_t> out_;
+  double bits_ = 0;
+};
+
+}  // namespace cmix

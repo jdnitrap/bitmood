@@ -51,6 +51,30 @@ check "different --seed gives different text" "[ '$g1' != '$g3' ]"
 check "generate does not modify the memory" "cmp -s '$T/one.st' '$T/two.st'"
 check "--temp 0 is rejected" "! $BIN generate 10 --temp 0 >/dev/null 2>&1"
 
+echo "generation controls"
+$BIN generate 400 "The " --state "$T/one.st" --temp 0.9 --seed 5 > "$T/g.txt"
+check "default output is valid UTF-8" "python3 -c 'open(\"$T/g.txt\",\"rb\").read().decode(\"utf-8\")'"
+check "default output only uses bytes seen in training" "python3 - '$T/g.txt' README.md CONVERSATION.md <<'PY'
+import sys
+out = open(sys.argv[1], 'rb').read()
+seen = set(open(sys.argv[2], 'rb').read() + open(sys.argv[3], 'rb').read() + b'The \n')
+sys.exit(0 if set(out) <= seen else 1)
+PY"
+$BIN generate 400 "The " --state "$T/one.st" --charset ascii --temp 1.2 --seed 5 > "$T/a.txt"
+check "--charset ascii gives printable ASCII only" "! LC_ALL=C grep -q '[^[:print:][:space:]]' '$T/a.txt'"
+$BIN generate 600 "The " --state "$T/one.st" --temp 0.5 --novelty 12 --seed 9 --stats > "$T/n.txt" 2> "$T/n.err"
+copy=$(grep -o 'longest copy from training text: [0-9]*' "$T/n.err" | grep -o '[0-9]*$')
+check "--novelty 12 caps copies from training text (longest $copy)" "[ '$copy' -le 12 ]"
+check "--novelty 12 blocks repeating its own 13-byte runs" "python3 - '$T/n.txt' <<'PY'
+import sys
+s = open(sys.argv[1], 'rb').read()[4:]   # skip the prompt
+runs = [s[i:i+13] for i in range(len(s) - 12)]
+sys.exit(0 if len(runs) == len(set(runs)) else 1)
+PY"
+k1=$($BIN generate 100 "The " --state "$T/one.st" --top-k 1 --seed 1 | md5sum)
+k2=$($BIN generate 100 "The " --state "$T/one.st" --top-k 1 --seed 2 | md5sum)
+check "--top-k 1 is greedy (seed does not matter)" "[ '$k1' = '$k2' ]"
+
 echo "grid views"
 words=(alpha beta gamma delta)
 for i in $(seq 400); do  # 23-byte records; the word and number vary without a longer period

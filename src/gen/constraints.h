@@ -1,0 +1,94 @@
+// Rules on which byte may come next during generation.
+//
+// Each constraint sees every emitted byte (accept) and, before each new
+// byte, clears the bytes it forbids (restrict). Constraints are values
+// (clone()), so the generator can snapshot and restore them.
+//
+// "Hard" constraints are never relaxed. "Soft" ones (like the novelty cap)
+// are dropped for one byte if together they leave nothing allowed.
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <deque>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "gen/suffix_array.h"
+
+namespace cmix {
+
+using ByteMask = std::array<bool, 256>;
+
+class Constraint {
+ public:
+  virtual ~Constraint() = default;
+  virtual std::unique_ptr<Constraint> clone() const = 0;
+  virtual void restrict(ByteMask& allowed) const = 0;
+  virtual void accept(uint8_t b) = 0;
+  // True while stopping here would leave broken output (mid UTF-8 sequence).
+  virtual bool must_continue() const { return false; }
+  virtual bool soft() const { return false; }
+};
+
+// Which bytes count as text.
+//   any   - everything
+//   ascii - printable ASCII, newline, tab
+//   utf8  - ascii plus well-formed UTF-8 multi-byte sequences
+//   seen  - utf8, limited to bytes that occur in the training text
+class CharsetFilter : public Constraint {
+ public:
+  enum class Mode { Any, Ascii, Utf8, Seen };
+  // `seen` is only used in Seen mode.
+  CharsetFilter(Mode m, const ByteMask& seen) : mode_(m), seen_(seen) {}
+  static Mode parse(const std::string& s);
+  std::unique_ptr<Constraint> clone() const override { return std::make_unique<CharsetFilter>(*this); }
+  void restrict(ByteMask& allowed) const override;
+  void accept(uint8_t b) override;
+  bool must_continue() const override { return pending_ > 0; }
+
+ private:
+  Mode mode_;
+  ByteMask seen_;
+  int pending_ = 0;                  // continuation bytes still owed
+  uint8_t lo_ = 0x80, hi_ = 0xBF;    // allowed range for the next continuation byte
+};
+
+// Novelty cap: never let the output copy more than `limit` bytes in a row,
+// either from the training text or from its own earlier output (which is
+// how generation falls into loops). Training text is checked with the
+// suffix array; the output with a set of hashes of every (limit+1)-byte run.
+class NoveltyFilter : public Constraint {
+ public:
+  NoveltyFilter(std::shared_ptr<const SuffixArray> sa, int limit) : sa_(std::move(sa)), limit_(limit) {}
+  std::unique_ptr<Constraint> clone() const override { return std::make_unique<NoveltyFilter>(*this); }
+  void restrict(ByteMask& allowed) const override;
+  void accept(uint8_t b) override;
+  bool soft() const override { return true; }
+
+ private:
+  static uint64_t hash_run(const std::deque<uint8_t>& w, int extra);  // extra < 0: none
+  std::shared_ptr<const SuffixArray> sa_;
+  int limit_;
+  std::deque<uint8_t> window_;                 // last `limit` bytes
+  std::vector<uint64_t> seen_runs_;            // sorted hashes of emitted (limit+1)-byte runs
+};
+
+// Measures (does not restrict) the longest run the output copied verbatim
+// from the training text.
+class CopyMeter {
+ public:
+  explicit CopyMeter(std::shared_ptr<const SuffixArray> sa) : sa_(std::move(sa)) {}
+  void accept(uint8_t b);
+  size_t current() const { return run_; }
+  size_t longest() const { return longest_; }
+
+ private:
+  static constexpr size_t kCap = 4096;
+  std::shared_ptr<const SuffixArray> sa_;
+  std::deque<uint8_t> tail_;
+  size_t run_ = 0, longest_ = 0;
+};
+
+}  // namespace cmix

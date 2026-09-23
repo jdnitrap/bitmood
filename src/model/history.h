@@ -8,6 +8,7 @@
 // Absolute positions stay valid when old bytes are dropped.
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -38,6 +39,14 @@ class History {
     buf_.erase(buf_.begin(), buf_.begin() + (std::ptrdiff_t)drop);
     base_ += drop;
     return true;
+  }
+
+  // Drops old bytes if needed so that `room` more bytes fit without a drop.
+  void make_room(size_t room) {
+    if (buf_.size() + room <= cap_) return;
+    size_t drop = std::min(buf_.size(), buf_.size() + room - cap_);
+    buf_.erase(buf_.begin(), buf_.begin() + (std::ptrdiff_t)drop);
+    base_ += drop;
   }
 
   // Roll back to an earlier absolute end. Only valid if no drop happened since.

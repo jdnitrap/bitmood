@@ -1,0 +1,143 @@
+#include "gen/generator.h"
+
+#include <algorithm>
+#include <cmath>
+#include <numeric>
+#include <stdexcept>
+
+#include "core/math.h"
+
+namespace cmix {
+
+namespace {
+// Room kept free in each model's history so a generation run never triggers
+// a drop of old history (which would make snapshots impossible to restore).
+constexpr size_t kHistoryRoom = size_t(1) << 18;
+}  // namespace
+
+Generator::Generator(std::vector<Source> sources, GenOptions opt)
+    : src_(std::move(sources)), opt_(opt), rng_(opt.seed) {
+  if (src_.empty()) throw std::runtime_error("generator needs at least one model");
+  if (!(opt_.temp > 0)) throw std::runtime_error("--temp must be > 0");
+  for (Source& s : src_) s.model->history().make_room(kHistoryRoom);
+}
+
+double Generator::uniform() { return (double)(rng_() >> 11) * 0x1.0p-53; }
+
+void Generator::advance(uint8_t b) {
+  for (Source& s : src_) s.model->advance_byte(s.stream, b);
+  for (auto& c : constraints_) c->accept(b);
+}
+
+void Generator::feed(uint8_t b) { advance(b); }
+
+bool Generator::must_continue() const {
+  for (const auto& c : constraints_)
+    if (c->must_continue()) return true;
+  return false;
+}
+
+void Generator::distribution(ByteProbs& p) const {
+  double wsum = 0;
+  for (const Source& s : src_) wsum += s.weight;
+  if (!(wsum > 0)) throw std::runtime_error("blend weights must sum to more than 0");
+  // node[(1 << depth) | partial] = P(next bit = 1) after `partial` (depth bits).
+  double node[256];
+  Model::Votes v;
+  for (int depth = 0; depth < 8; ++depth) {
+    for (int partial = 0; partial < (1 << depth); ++partial) {
+      BitPos bp;
+      bp.index = depth;
+      bp.partial = partial;
+      double z = 0;
+      for (const Source& s : src_) z += s.weight / wsum * stretch(s.model->predict(s.stream, bp, v));
+      node[(1 << depth) | partial] = squash((int)std::lround(z)) / 4096.0;
+    }
+  }
+  for (int c = 0; c < 256; ++c) {
+    double q = 1.0;
+    for (int depth = 0; depth < 8; ++depth) {
+      const int partial = c >> (8 - depth);
+      const double p1 = node[(1 << depth) | partial];
+      q *= ((c >> (7 - depth)) & 1) ? p1 : 1.0 - p1;
+    }
+    p[c] = q;
+  }
+}
+
+ByteMask Generator::allowed() const {
+  ByteMask all;
+  all.fill(true);
+  ByteMask hard = all;
+  for (const auto& c : constraints_)
+    if (!c->soft()) c->restrict(hard);
+  ByteMask both = hard;
+  for (const auto& c : constraints_)
+    if (c->soft()) c->restrict(both);
+  if (std::any_of(both.begin(), both.end(), [](bool b) { return b; })) return both;
+  if (std::any_of(hard.begin(), hard.end(), [](bool b) { return b; })) return hard;
+  throw std::runtime_error("the constraints leave no byte that may come next");
+}
+
+uint8_t Generator::next() {
+  ByteProbs model_p;
+  distribution(model_p);
+  const ByteMask ok = allowed();
+
+  // Candidates: allowed bytes with their temperature-adjusted weight.
+  std::vector<std::pair<double, int>> cand;
+  for (int c = 0; c < 256; ++c)
+    if (ok[c]) cand.push_back({std::pow(std::max(model_p[c], 1e-300), 1.0 / opt_.temp), c});
+  std::sort(cand.begin(), cand.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+  if (opt_.top_k > 0 && (int)cand.size() > opt_.top_k) cand.resize((size_t)opt_.top_k);
+  double total = 0;
+  for (const auto& x : cand) total += x.first;
+  if (opt_.top_p < 1.0) {
+    double run = 0;
+    size_t keep = 0;
+    while (keep < cand.size() && run < opt_.top_p * total) run += cand[keep++].first;
+    cand.resize(std::max<size_t>(keep, 1));
+    total = run;
+  }
+
+  double r = uniform() * total;
+  int chosen = cand.back().second;
+  for (const auto& x : cand) {
+    if (r < x.first) {
+      chosen = x.second;
+      break;
+    }
+    r -= x.first;
+  }
+  bits_ += -std::log2(std::max(model_p[chosen], 1e-300));
+  out_.push_back((uint8_t)chosen);
+  advance((uint8_t)chosen);
+  return (uint8_t)chosen;
+}
+
+Generator::Snapshot Generator::snapshot() const {
+  Snapshot s;
+  for (const Source& src : src_) {
+    s.streams.push_back(src.stream);
+    s.hist_end.push_back(src.model->history().end());
+  }
+  for (const auto& c : constraints_) s.constraints.push_back(c->clone());
+  s.rng = rng_;
+  s.out_size = out_.size();
+  s.bits = bits_;
+  return s;
+}
+
+void Generator::restore(const Snapshot& s) {
+  for (size_t i = 0; i < src_.size(); ++i) {
+    src_[i].stream = s.streams[i];
+    src_[i].model->history().truncate_to(s.hist_end[i]);
+  }
+  constraints_.clear();
+  for (const auto& c : s.constraints) constraints_.push_back(c->clone());
+  rng_ = s.rng;
+  out_.resize(s.out_size);
+  bits_ = s.bits;
+}
+
+}  // namespace cmix

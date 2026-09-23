@@ -35,6 +35,18 @@ Saved memory and generation:
 file. With `--state` the prompt only sets the context; without it the prompt
 is the only thing the model learns from.
 
+Each byte is chosen as a whole: the model's bit predictions at all 255
+nodes of the byte's bit tree give a probability for each of the 256
+bytes, then filters and sampling settings apply:
+
+| Option | Effect |
+|---|---|
+| `--temp T` | < 1 safer and more repetitive, > 1 wilder (default 1) |
+| `--top-k K`, `--top-p P` | keep only the K most likely bytes / the most likely bytes covering P of the probability |
+| `--charset seen` | (default) valid UTF-8 using only bytes that occur in the training text; also `utf8`, `ascii`, `any` |
+| `--novelty N` | never copy more than N bytes in a row from the training text *or* from its own earlier output (stops loops) |
+| `--stats` | print model surprise (bits/byte) and the longest run copied from the training text |
+
 Grid views (the ImHex idea) and file comparison:
 
 ```
