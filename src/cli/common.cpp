@@ -1,5 +1,6 @@
 #include "cli/common.h"
 
+#include <algorithm>
 #include <sstream>
 #include <stdexcept>
 
@@ -126,7 +127,10 @@ void add_standard_constraints(Generator& g, const Args& a, const GenSetup& setup
   for (const Source& s : setup.sources)
     for (uint8_t b : s.model->history().data()) seen[b] = true;
   const bool text = setup.sources[0].model->config().type == DataType::Text;
-  g.add_constraint(std::make_unique<CharsetFilter>(CharsetFilter::parse(a.str("charset", text ? "seen" : "any")), seen));
+  // A memory that has seen nothing yet can't use "seen"; fall back to utf8.
+  const bool any_seen = std::find(seen.begin(), seen.end(), true) != seen.end();
+  const std::string def = text ? (any_seen ? "seen" : "utf8") : "any";
+  g.add_constraint(std::make_unique<CharsetFilter>(CharsetFilter::parse(a.str("charset", def)), seen));
   const long long novelty = a.integer("novelty", 0);
   if (novelty < 0) throw std::runtime_error("--novelty must be >= 0");
   if (novelty > 0) g.add_constraint(std::make_unique<NoveltyFilter>(setup.training, (int)novelty));

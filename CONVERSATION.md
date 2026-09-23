@@ -114,7 +114,7 @@ dropped keys typed while a memory loaded (`TCSAFLUSH`).
 | types | `--type image` (PGM/PPM), `audio` (16-bit WAV), `raw`; specialists I and S; per-type views; `.ppm`/`.wav` output |
 | level 2 | Optional LSTM specialist L (`--lstm N`) |
 
-`make test` runs 54 end-to-end checks (round trips, memory identity,
+`make test` runs 55 end-to-end checks (round trips, memory identity,
 corruption, generation rules, pseudo-terminal `write`, types, LSTM).
 
 ## Measured

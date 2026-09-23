@@ -105,6 +105,7 @@ check "generate still leaves the memory untouched" "cmp -s '$T/one.st' '$T/two.s
 echo "interactive write"
 cp "$T/one.st" "$T/w.st"
 check "write: typing, Tab, backspace, arrow, Enter, save" "timeout 60 python3 tests/write_test.py $BIN '$T/w.st' '$T/w_out.txt' >/dev/null"
+check "generate works with no memory and an empty prompt" "$BIN generate 20 '' >/dev/null"
 check "write refuses to run without a terminal" "! $BIN write --state '$T/w.st' </dev/null 2>/dev/null"
 
 echo "data types: image, audio, raw"

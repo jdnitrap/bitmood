@@ -14,6 +14,9 @@ learn vs retain, generative writer without a transformer, graph specialist;
 2026-09-23: the build-out (bug fixes, phases 1–5, ImHex grid, data types, LSTM,
 measurements and known limits).
 
+**New here? Start with the [user guide](docs/USER_GUIDE.md)** — step by step
+from building to generating text, pictures and sounds, with real example output.
+
 Build the prototype:
 
 ```
