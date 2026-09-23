@@ -80,24 +80,19 @@ struct LongMatch {
     int pred = 0;
     for (size_t off = 3; off < max_check && off < 4096; ++off) {
       size_t match = 0;
-      while (match < n && match < 64) {
+      while (match < n && match < 64 && match < pos - off) {
         uint8_t older = win[(pos - off - 1 - match) % CAP];
         uint8_t now = hist[n - 1 - match];
         if (older != now) break;
         ++match;
       }
-      if ((int)match > best) {
-        best = (int)match;
-        uint8_t nxt = win[(pos - off) % CAP];
-        pred = (nxt >> (7 - bit_index)) & 1;
-        int have = 8 - bit_index;
-        int mask = (0xFF << have) & 0xFF;
-        if (bit_index > 0) {
-          int nxt_hi = nxt & mask;
-          int part_hi = (partial << have) & mask;
-          if (nxt_hi != part_hi) continue;
-        }
-      }
+      if ((int)match <= best) continue;
+      uint8_t nxt = win[(pos - off) % CAP];
+      int have = 8 - bit_index;
+      int mask = (0xFF << have) & 0xFF;
+      if ((nxt & mask) != ((partial << have) & mask)) continue;
+      best = (int)match;
+      pred = (nxt >> (7 - bit_index)) & 1;
     }
     if (best < 3) return 2048;
     int conf = std::min(1800, best * 80);
@@ -200,6 +195,12 @@ struct Predictor {
     if (hist.size() >= 2) h = RecentPattern::mix(h, hist[hist.size() - 2]);
     return h;
   }
+  uint32_t order_hash(size_t n, uint32_t seed) const {
+    uint32_t h = seed;
+    for (size_t i = 0; i < n && i < hist.size(); ++i)
+      h = RecentPattern::mix(h, hist[hist.size() - 1 - i]);
+    return h;
+  }
   int predict() {
     last_p[0] = A.predict(ctxA());
     last_p[1] = B.predict(hist, bit_index, partial);
@@ -224,9 +225,10 @@ struct Predictor {
       hist.push_back(b);
       if (hist.size() > 256) hist.erase(hist.begin(), hist.begin() + 64);
       last_byte = b;
-      h0 = h0 * 257u + b + 1;
-      h1 = h1 * 65599u + b + 3;
-      h2 = ((h2 << 5) ^ b) * 0x45d9f3bu + 7;
+      // D0/D1/D2 are order-1/3/4: hash only the last N bytes so contexts recur.
+      h0 = order_hash(1, 0x1000193u);
+      h1 = order_hash(3, 0x3000193u);
+      h2 = order_hash(4, 0x4000193u);
       bit_index = 0;
       partial = 0;
     }
@@ -240,8 +242,8 @@ struct Encoder {
   void encode_bit(int bit, int p4095) {
     p4095 = clampi(p4095, 1, 4094);
     uint32_t xmid = x1 + (uint32_t)(((uint64_t)(x2 - x1) * (uint32_t)p4095) >> 12);
-    if (bit) x1 = xmid + 1;
-    else x2 = xmid;
+    if (bit) x2 = xmid;
+    else x1 = xmid + 1;
     while (((x1 ^ x2) & 0xFF000000u) == 0) {
       out.put((char)(x2 >> 24));
       x1 <<= 8;
@@ -268,9 +270,9 @@ struct Decoder {
   int decode_bit(int p4095) {
     p4095 = clampi(p4095, 1, 4094);
     uint32_t xmid = x1 + (uint32_t)(((uint64_t)(x2 - x1) * (uint32_t)p4095) >> 12);
-    int bit = x > xmid;
-    if (bit) x1 = xmid + 1;
-    else x2 = xmid;
+    int bit = x <= xmid;
+    if (bit) x2 = xmid;
+    else x1 = xmid + 1;
     while (((x1 ^ x2) & 0xFF000000u) == 0) {
       x1 <<= 8;
       x2 = (x2 << 8) + 255;
