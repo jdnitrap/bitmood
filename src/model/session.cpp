@@ -17,6 +17,7 @@ double Session::learn_bit(int bit) {
   m_.bits_spent += cost;
   byte_bits_ += cost;
   if (bp_.index == 7) {
+    m_.learn_byte(s_, (uint8_t)(((bp_.partial << 1) | bit) & 0xFF));
     m_.note_byte_cost(byte_bits_);
     ++m_.bytes_learned;
     byte_bits_ = 0;

@@ -1,7 +1,7 @@
 // compress / decompress.
 //
-// Format "CMX3":
-//   magic "CMX3" | type u8 | width u32 | channels u8 | sample rate u32 (little-endian)
+// Format "CMX4":
+//   magic "CMX4" | type u8 | width u32 | channels u8 | sample rate u32 | LSTM cells u8 (little-endian)
 //   | container header length u32 | container header bytes (PNM / WAV header, kept as is)
 //   | payload length u64 | coded payload
 // The model learns and codes only the payload (text, pixels, samples).
@@ -11,6 +11,7 @@
 
 #include "cli/args.h"
 #include "cli/commands.h"
+#include "cli/common.h"
 #include "coder/arith.h"
 #include "core/serial.h"
 #include "io/files.h"
@@ -20,23 +21,22 @@
 namespace cmix {
 
 int cmd_compress(int argc, char** argv, int start) {
-  Args a(argc, argv, start, {"type", "width", "channels"}, {});
+  Args a(argc, argv, start, {"type", "width", "channels", "lstm"}, {});
   if (a.pos().size() != 2)
-    throw std::runtime_error("usage: compress [--type text|image|audio|raw] [--width W --channels C] <in> <out.cmxb>");
-  Config cfg;
-  cfg.type = parse_type(a.str("type", "text"));
-  cfg.width = (int)a.integer("width", 0);
-  cfg.channels = (int)a.integer("channels", 0);
+    throw std::runtime_error(
+        "usage: compress [--type text|image|audio|raw] [--width W --channels C] [--lstm N] <in> <out.cmxb>");
+  Config cfg = config_from_args(a);
   const TypedData d = read_typed(a.pos()[0], cfg.type, true);
   apply_shape(cfg, d, true, a.pos()[0]);
   cfg.sample_rate = d.sample_rate;
 
   Writer w;
-  w.tag("CMX3");
+  w.tag("CMX4");
   w.u8((uint8_t)cfg.type);
   w.u32((uint32_t)cfg.width);
   w.u8((uint8_t)cfg.channels);
   w.u32((uint32_t)cfg.sample_rate);
+  w.u8((uint8_t)cfg.lstm_cells);
   w.u32((uint32_t)d.header.size());
   w.bytes(d.header.data(), d.header.size());
   w.u64(d.payload.size());
@@ -65,9 +65,10 @@ int cmd_decompress(int argc, char** argv, int start) {
   if (a.pos().size() != 2) throw std::runtime_error("usage: decompress <in.cmxb> <out>");
   const std::string& path = a.pos()[0];
   std::vector<uint8_t> in = read_file(path);
-  if (in.size() >= 4 && (std::memcmp(in.data(), "CMXB", 4) == 0 || std::memcmp(in.data(), "CMX2", 4) == 0))
-    throw std::runtime_error(path + " was made by an older version of cmix-bit and cannot be read");
-  if (in.size() < 4 || std::memcmp(in.data(), "CMX3", 4) != 0) throw std::runtime_error(path + ": not a CMX3 file");
+  for (const char* old : {"CMXB", "CMX2", "CMX3"})
+    if (in.size() >= 4 && std::memcmp(in.data(), old, 4) == 0)
+      throw std::runtime_error(path + " was made by an older version of cmix-bit and cannot be read");
+  if (in.size() < 4 || std::memcmp(in.data(), "CMX4", 4) != 0) throw std::runtime_error(path + ": not a CMX4 file");
 
   Config cfg;
   std::vector<uint8_t> out;
@@ -75,13 +76,15 @@ int cmd_decompress(int argc, char** argv, int start) {
   size_t payload_at = 0;
   try {
     Reader r(in.data(), in.size());
-    r.expect_tag("CMX3");
+    r.expect_tag("CMX4");
     const uint8_t t = r.u8();
     if (t > (uint8_t)DataType::Raw) throw std::runtime_error("unknown data type");
     cfg.type = (DataType)t;
     cfg.width = (int)r.u32();
     cfg.channels = r.u8();
     cfg.sample_rate = (int)r.u32();
+    cfg.lstm_cells = r.u8();
+    if (cfg.lstm_cells > LstmState::kMaxCells) throw std::runtime_error("bad LSTM size");
     const uint32_t hlen = r.u32();
     if (hlen > r.remaining()) throw std::runtime_error("truncated");
     out.resize(hlen);

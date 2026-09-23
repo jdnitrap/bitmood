@@ -20,10 +20,10 @@ double bpb(double bits, uint64_t bytes) { return bytes ? bits / (double)bytes : 
 }  // namespace
 
 int cmd_train(int argc, char** argv, int start) {
-  Args a(argc, argv, start, {"state", "type", "table-bits", "width", "channels"}, {});
+  Args a(argc, argv, start, {"state", "type", "table-bits", "width", "channels", "lstm"}, {});
   if (!a.has("state") || a.pos().empty())
     throw std::runtime_error(
-        "usage: train --state <memory.bin> [--type text|image|audio|raw] [--table-bits 16..28]\n"
+        "usage: train --state <memory.bin> [--type text|image|audio|raw] [--table-bits 16..28] [--lstm N]\n"
         "             [--width W --channels 1|3 (raw pixel files)] <file>...");
   const std::string path = a.str("state");
   // The data type decides how files are read; a new image/audio memory
@@ -78,6 +78,7 @@ int cmd_info(int argc, char** argv, int start) {
   std::printf("history        %zu bytes kept\n", m->history().size());
   std::printf("tables         2^%d slots (%d MB), history up to %d MB\n", m->config().table_bits,
               (int)((8ull << m->config().table_bits) >> 20), (int)((1ull << m->config().history_bits) >> 20));
+  if (m->config().lstm_cells) std::printf("LSTM           %d cells\n", m->config().lstm_cells);
   std::printf("specialists   ");
   for (int i = 0; i < m->num_inputs(); ++i) std::printf(" %s", m->input_name(i).c_str());
   std::printf("\n");

@@ -135,6 +135,7 @@ records and 64-bit pointer regions on its own.
 | C1, C2 | byte classes of the last bytes (the MDBE flags: letter, digit, space, punctuation, UTF-8…), learned, plus column |
 | E | grid views (above) |
 | B1, B2 | long match: the most recent earlier place the last 5+ bytes occurred, found with a hash index over up to 16 MB of history |
+| L (optional) | level 2: a small byte-level LSTM (`--lstm N`, 1–64 cells) |
 
 Context statistics live in one shared table (`--table-bits`, default 22 =
 32 MB) of adaptive probabilities with 16-bit collision checks in buckets of
@@ -148,6 +149,23 @@ HTML and markdown this is about 20% smaller than `xz -9e`.
 A memory file holds the table, the history, the mixers and the APMs: about
 36 MB by default, about 6 MB with `--table-bits 18` (fine for a few hundred
 KB of training text).
+
+### Level 2: LSTM specialist
+
+```
+./cmix-bit train --state brain.bin --lstm 32 corpus.txt
+./cmix-bit compress --lstm 32 in.txt out.cmxb
+```
+
+Specialist **L** is a small LSTM (the recurrent network cmix uses, not a
+transformer; CPU only). It reads one byte at a time and keeps a running
+memory in its hidden state, giving a probability for each next byte that
+the mixer takes as one more vote. It learns online: the output layer every
+byte, backpropagation through the last 16 bytes every 16 bytes (Adam). It
+is off by default because it costs about 7-8x the time; on the test files
+it saves 0.3-1.3%, and it matters more the more text it trains on. The
+LSTM's hidden state is part of the stream, so generation, rollback and
+"train in one run == train in several" all work with it.
 
 ---
 

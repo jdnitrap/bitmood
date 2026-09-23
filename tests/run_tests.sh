@@ -146,6 +146,17 @@ check "audio generation writes a 0.25 s WAV" "[ \$(stat -c%s '$T/g.wav') -eq \$(
 check "image output without --out is rejected" "! $BIN generate --state '$T/img.st' --height 2 >/dev/null 2>&1"
 check "a WAV is rejected as an image" "! $BIN compress --type image '$T/tone.wav' '$T/x' 2>/dev/null"
 
+echo "level 2: LSTM"
+$BIN compress --lstm 8 CONVERSATION.md "$T/l.cmxb" 2>/dev/null && $BIN decompress "$T/l.cmxb" "$T/l.out" 2>/dev/null
+check "--lstm 8 round trip is byte-identical" "cmp -s CONVERSATION.md '$T/l.out'"
+$BIN train --state "$T/l1.st" --lstm 8 --table-bits 18 README.md CONVERSATION.md 2>/dev/null
+$BIN train --state "$T/l2.st" --lstm 8 --table-bits 18 README.md 2>/dev/null
+$BIN train --state "$T/l2.st" CONVERSATION.md 2>/dev/null
+check "LSTM memory: one run == two runs" "cmp -s '$T/l1.st' '$T/l2.st'"
+check "info shows the LSTM" "$BIN info '$T/l1.st' | grep -q 'LSTM           8 cells'"
+check "a different --lstm on an existing memory is rejected" "! $BIN train --state '$T/l1.st' --lstm 16 README.md 2>/dev/null"
+check "--lstm 65 is rejected" "! $BIN compress --lstm 65 README.md '$T/x' 2>/dev/null"
+
 echo "grid views"
 words=(alpha beta gamma delta)
 for i in $(seq 400); do  # 23-byte records; the word and number vary without a longer period

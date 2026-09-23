@@ -11,6 +11,7 @@
 
 #include <cstdint>
 
+#include "model/stream_types.h"
 #include "model/width_finder.h"
 
 namespace cmix {
@@ -48,6 +49,7 @@ struct Stream {
   uint64_t line_start = 0;       // first byte of the current line
   uint64_t prev_line_start = 0;  // first byte of the line above
   WidthFinder widths;
+  LstmState lstm;  // level 2 specialist (only used when the model has one)
 };
 
 }  // namespace cmix

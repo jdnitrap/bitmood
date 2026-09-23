@@ -26,6 +26,7 @@ struct Config {
   int width = 0;           // image: pixels per row
   int channels = 0;        // image: 1 (grey) or 3 (RGB); audio: 1 or 2
   int sample_rate = 0;     // audio (only used when writing WAV files)
+  int lstm_cells = 0;      // level 2 LSTM specialist size (0 = off)
 
   // The grid views this type starts with.
   std::vector<View> views() const;

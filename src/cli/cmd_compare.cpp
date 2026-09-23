@@ -11,6 +11,7 @@
 
 #include "cli/args.h"
 #include "cli/commands.h"
+#include "cli/common.h"
 #include "core/math.h"
 #include "io/files.h"
 #include "io/formats.h"
@@ -126,18 +127,14 @@ std::string bar(double bpb) {
   return s;
 }
 
-double per_byte(double bits, uint64_t n) { return n ? bits / (double)n : 0.0; }
-
 }  // namespace
 
 int cmd_compare(int argc, char** argv, int start) {
-  Args a(argc, argv, start, {"type", "width", "channels"}, {});
+  Args a(argc, argv, start, {"type", "width", "channels", "lstm"}, {});
   if (a.pos().size() != 2)
-    throw std::runtime_error("usage: compare [--type text|image|audio|raw] [--width W --channels C] <fileA> <fileB>");
-  Config base;
-  base.type = parse_type(a.str("type", "text"));
-  base.width = (int)a.integer("width", 0);
-  base.channels = (int)a.integer("channels", 0);
+    throw std::runtime_error(
+        "usage: compare [--type text|image|audio|raw] [--width W --channels C] [--lstm N] <fileA> <fileB>");
+  const Config base = config_from_args(a);
 
   std::vector<uint8_t> data[2];
   Config cfg[2] = {base, base};

@@ -16,11 +16,13 @@
 //   S1..S4                                   audio: earlier samples (audio)
 //   E..                                      grid views, two votes each
 //   B1, B2                                   long match
+//   L                                        LSTM (level 2, optional)
 //   bias
 #pragma once
 
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -30,6 +32,7 @@
 #include "model/context_table.h"
 #include "model/grid.h"
 #include "model/history.h"
+#include "model/lstm.h"
 #include "model/match_model.h"
 #include "model/mixer.h"
 #include "model/stream.h"
@@ -85,6 +88,8 @@ class Model {
 
   int predict(const Stream& s, BitPos bp, Votes& v) const;
   void learn(const Stream& s, BitPos bp, const Votes& v, int bit);
+  // Byte-level learning (the LSTM); call when byte b is complete, before advance_byte.
+  void learn_byte(const Stream& s, uint8_t b);
   void advance_byte(Stream& s, uint8_t b);
   // Marks the start of a new record (an image or a sound) at the current
   // position, so pixel and sample positions count from here.
@@ -120,6 +125,7 @@ class Model {
   int n_ctx_ = 0;       // table-backed inputs come first
   int grid_first_ = 0;  // first grid input
   int match_first_ = 0;
+  int lstm_input_ = -1;  // -1 = no LSTM
   int bias_ = 0;
   int n_inputs_ = 0;
   ContextTable table_;
@@ -128,6 +134,7 @@ class Model {
   std::vector<Mixer> mix_;
   Mixer final_;
   Apm apm1_, apm2_;
+  std::unique_ptr<Lstm> lstm_;
 };
 
 }  // namespace cmix

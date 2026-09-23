@@ -65,7 +65,8 @@ Model::Model(const Config& cfg)
              grid_.num_inputs()),
       grid_first_(n_ctx_ - grid_.num_inputs()),
       match_first_(n_ctx_),
-      bias_(n_ctx_ + MatchModel::kInputs),
+      lstm_input_(cfg.lstm_cells > 0 ? n_ctx_ + MatchModel::kInputs : -1),
+      bias_(n_ctx_ + MatchModel::kInputs + (cfg.lstm_cells > 0 ? 1 : 0)),
       n_inputs_(bias_ + 1),
       table_(cfg.table_bits),
       tracker_(grid_.num_views()),
@@ -73,6 +74,7 @@ Model::Model(const Config& cfg)
       apm1_(256),
       apm2_(257 * 256) {
   if (n_inputs_ > kMaxInputs) throw std::runtime_error("too many model inputs");
+  if (cfg.lstm_cells > 0) lstm_ = std::make_unique<Lstm>(cfg.lstm_cells);
   typed_first_ = grid_first_ - cfg.image_inputs() - cfg.audio_inputs();
   if (cfg.type == DataType::Image && (cfg.width <= 0 || cfg.channels <= 0))
     throw std::runtime_error("image model needs width and channels");
@@ -100,6 +102,7 @@ std::string Model::input_name(int i) const {
   }
   if (i == match_first_) return "B1";
   if (i == match_first_ + 1) return "B2";
+  if (i == lstm_input_) return "L";
   return "bias";
 }
 
@@ -126,6 +129,7 @@ std::string Model::input_label(int i) const {
   }
   if (i == match_first_) return "B long match (learned)";
   if (i == match_first_ + 1) return "B long match (length)";
+  if (i == lstm_input_) return "L LSTM (" + std::to_string(cfg_.lstm_cells) + " cells)";
   return "bias";
 }
 
@@ -219,6 +223,10 @@ int Model::predict(const Stream& s, BitPos bp, Votes& v) const {
     }
   }
   match_.predict(hist_, s, bp, v.x + match_first_, v.p + match_first_, v.match_slot);
+  if (lstm_) {
+    v.p[lstm_input_] = lstm_->p_bit(s.lstm, bp.index, bp.partial);
+    v.x[lstm_input_] = s.lstm.ready ? stretch(v.p[lstm_input_]) : 0.0f;
+  }
   v.x[bias_] = 0.5f;
   v.p[bias_] = 32768;
 
@@ -262,7 +270,12 @@ void Model::learn(const Stream& s, BitPos bp, const Votes& v, int bit) {
   tracker_.learn(v.p[kInputA], v.p + grid_first_, bit);
 }
 
+void Model::learn_byte(const Stream& s, uint8_t b) {
+  if (lstm_) lstm_->learn(s.lstm, b);
+}
+
 void Model::advance_byte(Stream& s, uint8_t b) {
+  if (lstm_) lstm_->forward(s.lstm, b);
   if (hist_.push(b)) match_.rebuild(hist_);
   s.last_byte = b;
   ++s.bytes;
@@ -302,6 +315,10 @@ void Model::save(Writer& w) const {
   w.tag("APMS");
   apm1_.save(w);
   apm2_.save(w);
+  if (lstm_) {
+    w.tag("LSTM");
+    lstm_->save(w);
+  }
   w.tag("STAT");
   w.u64(bytes_learned);
   w.f64(bits_spent);
@@ -328,6 +345,10 @@ void Model::load(Reader& r) {
   r.expect_tag("APMS");
   apm1_.load(r);
   apm2_.load(r);
+  if (lstm_) {
+    r.expect_tag("LSTM");
+    lstm_->load(r);
+  }
   r.expect_tag("STAT");
   bytes_learned = r.u64();
   bits_spent = r.f64();

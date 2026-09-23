@@ -21,6 +21,11 @@ Config config_from_args(const Args& a) {
   if (a.has("width")) cfg.width = (int)a.integer("width", 0);
   if (a.has("channels")) cfg.channels = (int)a.integer("channels", 0);
   if (a.has("sample-rate")) cfg.sample_rate = (int)a.integer("sample-rate", 0);
+  if (a.has("lstm")) {
+    long long n = a.integer("lstm", 0);
+    if (n < 0 || n > LstmState::kMaxCells) throw std::runtime_error("--lstm must be 0..64 cells");
+    cfg.lstm_cells = (int)n;
+  }
   return cfg;
 }
 
@@ -35,6 +40,8 @@ std::unique_ptr<Model> open_or_create(const std::string& path, const Args& a, St
     return std::make_unique<Model>(cfg);
   }
   auto m = load_state(path, s);
+  if (a.has("lstm") && a.integer("lstm", 0) != m->config().lstm_cells)
+    throw std::runtime_error(path + " already exists with --lstm " + std::to_string(m->config().lstm_cells));
   if (a.has("table-bits") && a.integer("table-bits", 0) != m->config().table_bits)
     throw std::runtime_error(path + " already exists with --table-bits " + std::to_string(m->config().table_bits));
   if (a.has("type") && parse_type(a.str("type")) != m->config().type)
