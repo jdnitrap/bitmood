@@ -17,6 +17,7 @@
 //   E..                                      grid views, two votes each
 //   B1, B2                                   long match
 //   L                                        LSTM (level 2, optional)
+//   G                                        graph of words / sound shapes / pixel runs (optional)
 //   bias
 #pragma once
 
@@ -33,6 +34,7 @@
 #include "model/grid.h"
 #include "model/history.h"
 #include "model/lstm.h"
+#include "graph/token_graph.h"
 #include "model/match_model.h"
 #include "model/mixer.h"
 #include "model/stream.h"
@@ -91,9 +93,23 @@ class Model {
   // Byte-level learning (the LSTM); call when byte b is complete, before advance_byte.
   void learn_byte(const Stream& s, uint8_t b);
   void advance_byte(Stream& s, uint8_t b);
+  // Graph learning; call after advance_byte of a learned byte.
+  void learned_byte(const Stream& s);
   // Marks the start of a new record (an image or a sound) at the current
   // position, so pixel and sample positions count from here.
-  void begin_record(Stream& s) const { s.record_start = hist_.end(); }
+  void begin_record(Stream& s) const;
+
+  // Graph planning (generation): at the start of a word / slice / run the
+  // generator may pick which token to aim for.
+  bool graph_can_plan(const Stream& s) const;
+  std::vector<TokenGraph::Candidate> graph_candidates(const Stream& s) const;
+  void replan(Stream& s, Token t) const;  // kNoToken: nothing to plan
+  // Text: the byte that continues the planned word (' ' once it is complete), or -1.
+  int plan_next_byte(const Stream& s) const;
+  const TokenGraph* graph() const { return graph_.get(); }
+  const Vocab& vocab() const { return vocab_; }
+  // Audio slice length in samples.
+  int slice_samples() const { return cfg_.sample_rate > 0 ? std::max(16, cfg_.sample_rate / 50) : 160; }
 
   History& history() { return hist_; }
   const History& history() const { return hist_; }
@@ -116,7 +132,11 @@ class Model {
   void contexts(const Stream& s, uint64_t* out) const;  // byte-level hashes of table inputs
   void image_contexts(const Stream& s, uint64_t* out) const;
   void audio_contexts(const Stream& s, uint64_t* out) const;
+  void graph_advance(Stream& s, uint8_t b) const;
+  void text_graph_tree(GraphState& g) const;
   int typed_first_ = 0;  // first image/audio input
+  int graph_table_input_ = -1;  // audio/image G (table-backed)
+  int graph_vote_input_ = -1;   // text G (direct vote)
 
   Config cfg_;
   History hist_;
@@ -135,6 +155,8 @@ class Model {
   Mixer final_;
   Apm apm1_, apm2_;
   std::unique_ptr<Lstm> lstm_;
+  std::unique_ptr<TokenGraph> graph_;
+  Vocab vocab_;
 };
 
 }  // namespace cmix

@@ -38,6 +38,8 @@ struct GenOptions {
   double temp = 1.0;   // < 1 sharper, > 1 flatter
   double top_p = 1.0;  // keep the smallest set of bytes whose probability sums to top_p
   int top_k = 0;       // keep only the k most likely bytes (0 = off)
+  bool plan = false;   // graph planning: pick the next word / slice / run to aim for
+  double plan_strength = 4.0;  // text: the byte continuing the planned word gets (1 + this) x weight
   uint64_t seed = 0xC0FFEE;
 };
 
@@ -103,6 +105,7 @@ class Generator {
 
  private:
   void advance(uint8_t b);
+  void plan_units();
   double uniform();
   std::vector<Source> src_;
   GenOptions opt_;

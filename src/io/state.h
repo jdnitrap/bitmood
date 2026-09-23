@@ -12,7 +12,7 @@
 
 namespace cmix {
 
-constexpr uint32_t kStateVersion = 6;
+constexpr uint32_t kStateVersion = 7;
 
 void save_state(const std::string& path, const Model& m, const Stream& s);
 // Throws std::runtime_error explaining what is wrong with the file.

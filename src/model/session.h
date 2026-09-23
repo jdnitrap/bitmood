@@ -22,6 +22,7 @@ class Session {
 
   // Starts a new record (image, sound) at the current position.
   void begin_record() { m_.begin_record(s_); }
+  Stream& mutable_stream() { return s_; }
 
   // Whole-byte helpers.
   double learn_byte(uint8_t b);

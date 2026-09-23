@@ -22,6 +22,8 @@ Config config_from_args(const Args& a) {
   if (a.has("width")) cfg.width = (int)a.integer("width", 0);
   if (a.has("channels")) cfg.channels = (int)a.integer("channels", 0);
   if (a.has("sample-rate")) cfg.sample_rate = (int)a.integer("sample-rate", 0);
+  if (a.has("graph")) cfg.graph = true;
+  if (a.has("graph-confirm")) cfg.graph_confirm = (int)a.integer("graph-confirm", 2);
   if (a.has("lstm")) {
     long long n = a.integer("lstm", 0);
     if (n < 0 || n > LstmState::kMaxCells) throw std::runtime_error("--lstm must be 0..64 cells");
@@ -41,6 +43,8 @@ std::unique_ptr<Model> open_or_create(const std::string& path, const Args& a, St
     return std::make_unique<Model>(cfg);
   }
   auto m = load_state(path, s);
+  if ((a.has("graph") || a.has("graph-confirm")) && !m->config().graph)
+    throw std::runtime_error(path + " already exists without a graph; --graph only applies to new memories");
   if (a.has("lstm") && a.integer("lstm", 0) != m->config().lstm_cells)
     throw std::runtime_error(path + " already exists with --lstm " + std::to_string(m->config().lstm_cells));
   if (a.has("table-bits") && a.integer("table-bits", 0) != m->config().table_bits)
@@ -67,6 +71,7 @@ std::vector<double> parse_blend(const std::string& s, size_t n) {
 }  // namespace
 
 GenSetup load_sources(const Args& a, const std::string& prompt, bool need_training_text) {
+  if (a.has("graph-plan") && a.all("state").empty()) throw std::runtime_error("--graph-plan needs a memory made with --graph");
   GenSetup g;
   const std::vector<std::string> paths = a.all("state");
   std::vector<double> weights(paths.size(), 1.0);
@@ -99,6 +104,8 @@ GenSetup load_sources(const Args& a, const std::string& prompt, bool need_traini
     Session s(*m, st);
     if (m->config().type == DataType::Image || m->config().type == DataType::Audio) s.begin_record();
     for (unsigned char ch : prompt) s.feed_byte(ch);
+    if (a.has("graph-plan") && !m->graph())
+      throw std::runtime_error(paths[i] + " has no graph (train a new memory with --graph)");
     g.sources.push_back({m.get(), s.stream(), weights[i]});
     g.models.push_back(std::move(m));
   }
@@ -116,6 +123,9 @@ GenOptions gen_options(const Args& a) {
   o.top_p = a.num("top-p", 1.0);
   o.top_k = (int)a.integer("top-k", 0);
   o.seed = (uint64_t)a.integer("seed", 0xC0FFEE);
+  o.plan = a.has("graph-plan") || a.has("plan-strength");
+  o.plan_strength = a.num("plan-strength", 4.0);
+  if (o.plan_strength < 0) throw std::runtime_error("--plan-strength must be >= 0");
   if (!(o.temp > 0)) throw std::runtime_error("--temp must be > 0");
   if (!(o.top_p > 0 && o.top_p <= 1)) throw std::runtime_error("--top-p must be in (0, 1]");
   if (o.top_k < 0) throw std::runtime_error("--top-k must be >= 0");
@@ -152,7 +162,7 @@ void add_shape_constraints(Generator& g, const Args& a) {
 const std::set<std::string> kGenValued = {"state",   "blend",      "blend-mode", "temp",     "top-p",    "top-k",
                                           "seed",    "charset",    "novelty",  "line-start", "acrostic",
                                           "max-line", "words",     "best-of",  "out",      "height",
-                                          "seconds"};
-const std::set<std::string> kGenFlags = {"stats", "rhyme"};
+                                          "seconds",  "plan-strength"};
+const std::set<std::string> kGenFlags = {"stats", "rhyme", "graph-plan"};
 
 }  // namespace cmix

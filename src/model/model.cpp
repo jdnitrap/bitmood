@@ -62,11 +62,11 @@ Model::Model(const Config& cfg)
       hist_(size_t(1) << cfg.history_bits),
       grid_(cfg.views()),
       n_ctx_(kOrderInputs + (cfg.words() ? 2 : 0) + 2 + cfg.image_inputs() + cfg.audio_inputs() +
-             grid_.num_inputs()),
+             cfg.graph_table_inputs() + grid_.num_inputs()),
       grid_first_(n_ctx_ - grid_.num_inputs()),
       match_first_(n_ctx_),
       lstm_input_(cfg.lstm_cells > 0 ? n_ctx_ + MatchModel::kInputs : -1),
-      bias_(n_ctx_ + MatchModel::kInputs + (cfg.lstm_cells > 0 ? 1 : 0)),
+      bias_(n_ctx_ + MatchModel::kInputs + (cfg.lstm_cells > 0 ? 1 : 0) + cfg.graph_vote_inputs()),
       n_inputs_(bias_ + 1),
       table_(cfg.table_bits),
       tracker_(grid_.num_views()),
@@ -75,7 +75,14 @@ Model::Model(const Config& cfg)
       apm2_(257 * 256) {
   if (n_inputs_ > kMaxInputs) throw std::runtime_error("too many model inputs");
   if (cfg.lstm_cells > 0) lstm_ = std::make_unique<Lstm>(cfg.lstm_cells);
-  typed_first_ = grid_first_ - cfg.image_inputs() - cfg.audio_inputs();
+  typed_first_ = grid_first_ - cfg.graph_table_inputs() - cfg.image_inputs() - cfg.audio_inputs();
+  if (cfg.graph_table_inputs()) graph_table_input_ = grid_first_ - 1;
+  if (cfg.graph_vote_inputs()) graph_vote_input_ = bias_ - 1;
+  if (cfg.graph) {
+    if (cfg.type == DataType::Raw) throw std::runtime_error("--graph works with text, image and audio memories");
+    if (cfg.graph_confirm < 1 || cfg.graph_confirm > 1000) throw std::runtime_error("--graph-confirm must be 1..1000");
+    graph_ = std::make_unique<TokenGraph>((uint32_t)cfg.graph_confirm);
+  }
   if (cfg.type == DataType::Image && (cfg.width <= 0 || cfg.channels <= 0))
     throw std::runtime_error("image model needs width and channels");
   if (cfg.type == DataType::Audio && cfg.channels <= 0) throw std::runtime_error("audio model needs channels");
@@ -94,6 +101,7 @@ std::string Model::input_name(int i) const {
   }
   if (i == k) return "C1";
   if (i == k + 1) return "C2";
+  if (i == graph_table_input_ || i == graph_vote_input_) return "G";
   if (i >= typed_first_ && i < grid_first_)
     return (cfg_.type == DataType::Image ? "I" : "S") + std::to_string(i - typed_first_ + 1);
   if (i >= grid_first_ && i < match_first_) {
@@ -116,6 +124,8 @@ std::string Model::input_label(int i) const {
   }
   if (i == k) return "C byte classes";
   if (i == k + 1) return "C classes + column";
+  if (i == graph_table_input_ || i == graph_vote_input_)
+    return cfg_.type == DataType::Text ? "G word graph" : (cfg_.type == DataType::Image ? "G pixel-run graph" : "G sound-shape graph");
   if (i >= typed_first_ && i < grid_first_) {
     static const char* image[6] = {"I left pixel",       "I pixel above",       "I left+above average",
                                    "I gradient L+U-UL",  "I neighbourhood",     "I colour / vertical trend"};
@@ -146,6 +156,19 @@ void Model::contexts(const Stream& s, uint64_t* out) const {
   if (cfg_.type == DataType::Image) image_contexts(s, out + k);
   if (cfg_.type == DataType::Audio) audio_contexts(s, out + k);
   k += cfg_.image_inputs() + cfg_.audio_inputs();
+  if (graph_table_input_ >= 0) {
+    // The shape the graph expects for this slice / run, with where we are in it.
+    const uint64_t rel = hist_.end() - std::min(hist_.end(), s.record_start);
+    uint64_t where;
+    if (cfg_.type == DataType::Image) {
+      const uint64_t c = (uint64_t)cfg_.channels;
+      const int left = (rel >= c && hist_.has(hist_.end() - c)) ? hist_.at(hist_.end() - c) : 0;
+      where = (rel % c) << 8 | (uint64_t)(left >> 5);
+    } else {
+      where = (rel & 1) << 8 | (uint64_t)(s.graph.n * 4 / (uint32_t)slice_samples());
+    }
+    out[k++] = hash_add(hash_add(0x6A00, (uint64_t)s.graph.expect), where);
+  }
   grid_.contexts(hist_, s, out + k);
 }
 
@@ -227,6 +250,17 @@ int Model::predict(const Stream& s, BitPos bp, Votes& v) const {
     v.p[lstm_input_] = lstm_->p_bit(s.lstm, bp.index, bp.partial);
     v.x[lstm_input_] = s.lstm.ready ? stretch(v.p[lstm_input_]) : 0.0f;
   }
+  if (graph_vote_input_ >= 0) {
+    const GraphState& g = s.graph;
+    if (g.tree_ready) {
+      const int id = (int)bp.key();
+      v.p[graph_vote_input_] = to_p16(clampf(g.tree[2 * id + 1] / g.tree[id], 1e-4f, 1.0f - 1e-4f));
+      v.x[graph_vote_input_] = stretch(v.p[graph_vote_input_]);
+    } else {
+      v.p[graph_vote_input_] = 32768;
+      v.x[graph_vote_input_] = 0.0f;
+    }
+  }
   v.x[bias_] = 0.5f;
   v.p[bias_] = 32768;
 
@@ -274,6 +308,18 @@ void Model::learn_byte(const Stream& s, uint8_t b) {
   if (lstm_) lstm_->learn(s.lstm, b);
 }
 
+void Model::begin_record(Stream& s) const {
+  s.record_start = hist_.end();
+  // A new image / sound starts a new slice or run.
+  s.graph.n = 0;
+  s.graph.sum_sq = 0;
+  s.graph.zero_crossings = 0;
+  s.graph.last_sign = 0;
+  s.graph.plan = GraphState::kNone;
+  s.graph.planned = false;
+  s.graph.expect = GraphState::kNone;
+}
+
 void Model::advance_byte(Stream& s, uint8_t b) {
   if (lstm_) lstm_->forward(s.lstm, b);
   if (hist_.push(b)) match_.rebuild(hist_);
@@ -297,6 +343,7 @@ void Model::advance_byte(Stream& s, uint8_t b) {
   }
   s.classes = ((s.classes << 4) | byte_class(b)) & 0xFFFF;
   match_.advance(hist_, s);
+  if (graph_) graph_advance(s, b);
 }
 
 void Model::save(Writer& w) const {
@@ -318,6 +365,11 @@ void Model::save(Writer& w) const {
   if (lstm_) {
     w.tag("LSTM");
     lstm_->save(w);
+  }
+  if (graph_) {
+    w.tag("GRPH");
+    graph_->save(w);
+    vocab_.save(w);
   }
   w.tag("STAT");
   w.u64(bytes_learned);
@@ -348,6 +400,11 @@ void Model::load(Reader& r) {
   if (lstm_) {
     r.expect_tag("LSTM");
     lstm_->load(r);
+  }
+  if (graph_) {
+    r.expect_tag("GRPH");
+    graph_->load(r);
+    vocab_.load(r);
   }
   r.expect_tag("STAT");
   bytes_learned = r.u64();

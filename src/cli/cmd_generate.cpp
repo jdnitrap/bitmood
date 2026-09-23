@@ -17,7 +17,7 @@ int cmd_generate(int argc, char** argv, int start) {
       "usage: generate <nbytes> [prompt] [--state memory.bin]... [--blend w1,w2,..] [--blend-mode mix|product]\n"
       "       [--temp T] [--top-p P] [--top-k K] [--seed N] [--charset seen|utf8|ascii|any]\n"
       "       [--novelty N] [--line-start CHARS | --acrostic WORD] [--max-line N]\n"
-      "       [--words FILE] [--rhyme] [--best-of N] [--stats]\n"
+      "       [--words FILE] [--rhyme] [--best-of N] [--graph-plan] [--stats]\n"
       "   image memory: generate --state img.bin --height H --out new.ppm\n"
       "   audio memory: generate --state snd.bin --seconds S --out new.wav\n"
       "   raw memory:   generate <nbytes> --state raw.bin [--out file]";

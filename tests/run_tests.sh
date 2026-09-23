@@ -158,6 +158,26 @@ check "info shows the LSTM" "$BIN info '$T/l1.st' | grep -q 'LSTM           8 ce
 check "a different --lstm on an existing memory is rejected" "! $BIN train --state '$T/l1.st' --lstm 16 README.md 2>/dev/null"
 check "--lstm 65 is rejected" "! $BIN compress --lstm 65 README.md '$T/x' 2>/dev/null"
 
+echo "graph specialist: text"
+$BIN train --state "$T/g1.st" --graph --table-bits 18 README.md CONVERSATION.md 2>/dev/null
+$BIN train --state "$T/g2.st" --graph --table-bits 18 README.md 2>/dev/null
+$BIN train --state "$T/g2.st" CONVERSATION.md 2>/dev/null
+check "graph memory: one run == two runs" "cmp -s '$T/g1.st' '$T/g2.st'"
+check "info shows the graph" "$BIN info '$T/g1.st' | grep -q '^graph .* confirmed'"
+check "graph summary lists 'the' among frequent words" "$BIN graph '$T/g1.st' | grep -A3 'most frequent' | grep -q ' the$'"
+check "graph WORD shows what follows it" "$BIN graph '$T/g1.st' the | grep -q '^after'"
+check "graph rejects an unseen word" "! $BIN graph '$T/g1.st' zzqqxx 2>/dev/null"
+$BIN train --state "$T/g3.st" --graph --graph-confirm 1000 --table-bits 18 README.md 2>/dev/null
+check "--graph-confirm 1000 leaves every edge a candidate" "$BIN info '$T/g3.st' | grep -q '(0 confirmed'"
+check "--graph-plan needs a graph" "! $BIN generate 10 'The ' --state '$T/one.st' --graph-plan 2>/dev/null"
+p1=$($BIN generate 200 "The " --state "$T/g1.st" --graph-plan --seed 4 | md5sum)
+p2=$($BIN generate 200 "The " --state "$T/g1.st" --graph-plan --seed 4 | md5sum)
+check "--graph-plan is repeatable with the same seed" "[ '$p1' = '$p2' ]"
+check "generate --graph-plan leaves the memory untouched" "$BIN train --state '$T/g4.st' --graph --table-bits 18 README.md CONVERSATION.md 2>/dev/null && cmp -s '$T/g1.st' '$T/g4.st'"
+$BIN compress --graph CONVERSATION.md "$T/gc.cmxb" 2>/dev/null && $BIN decompress "$T/gc.cmxb" "$T/gc.out" 2>/dev/null
+check "--graph round trip is byte-identical" "cmp -s CONVERSATION.md '$T/gc.out'"
+check "--graph on a raw memory is rejected" "! $BIN train --state '$T/gr.st' --type raw --graph README.md 2>/dev/null"
+
 echo "grid views"
 words=(alpha beta gamma delta)
 for i in $(seq 400); do  # 23-byte records; the word and number vary without a longer period

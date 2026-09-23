@@ -130,10 +130,10 @@ std::string bar(double bpb) {
 }  // namespace
 
 int cmd_compare(int argc, char** argv, int start) {
-  Args a(argc, argv, start, {"type", "width", "channels", "lstm"}, {});
+  Args a(argc, argv, start, {"type", "width", "channels", "lstm", "graph-confirm"}, {"graph"});
   if (a.pos().size() != 2)
     throw std::runtime_error(
-        "usage: compare [--type text|image|audio|raw] [--width W --channels C] [--lstm N] <fileA> <fileB>");
+        "usage: compare [--type text|image|audio|raw] [--width W --channels C] [--lstm N] [--graph] <fileA> <fileB>");
   const Config base = config_from_args(a);
 
   std::vector<uint8_t> data[2];

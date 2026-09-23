@@ -19,6 +19,8 @@ void save_config(Writer& w, const Config& c) {
   w.u8((uint8_t)c.channels);
   w.u32((uint32_t)c.sample_rate);
   w.u8((uint8_t)c.lstm_cells);
+  w.u8(c.graph ? 1 : 0);
+  w.u32((uint32_t)c.graph_confirm);
 }
 
 Config load_config(Reader& r) {
@@ -35,6 +37,8 @@ Config load_config(Reader& r) {
   c.sample_rate = (int)r.u32();
   c.lstm_cells = r.u8();
   if (c.lstm_cells > LstmState::kMaxCells) throw std::runtime_error("state file: bad LSTM size");
+  c.graph = r.u8() != 0;
+  c.graph_confirm = (int)r.u32();
   if (c.table_bits < 16 || c.table_bits > 30 || c.history_bits < 16 || c.history_bits > 32)
     throw std::runtime_error("state file: bad table or history size");
   return c;
@@ -57,6 +61,23 @@ void save_stream(Writer& w, const Stream& s) {
   w.i32(l.x);
   for (float t : l.tree) w.f32(t);
   w.u8(l.ready ? 1 : 0);
+  const GraphState& g = s.graph;
+  for (uint32_t t : {g.t0, g.t1, g.learn_t1, g.learn_t0, g.learn_next, g.plan, g.expect}) w.u32(t);
+  w.u8(g.completed);
+  w.u8(g.planned);
+  w.bytes(g.word, sizeof g.word);
+  w.i32(g.wlen);
+  w.u8(g.overflow);
+  w.u8(g.capital);
+  w.bytes(g.done_word, sizeof g.done_word);
+  w.i32(g.done_len);
+  for (float t : g.tree) w.f32(t);
+  w.u8(g.tree_ready);
+  w.u32(g.n);
+  w.u32(g.zero_crossings);
+  w.i32(g.last_sign);
+  w.f64(g.sum_sq);
+  w.f64(g.prev_rms);
   w.u64(s.line_start);
   w.u64(s.prev_line_start);
   s.widths.save(w);
@@ -80,6 +101,25 @@ Stream load_stream(Reader& r) {
   l.x = r.i32();
   for (float& t : l.tree) t = r.f32();
   l.ready = r.u8() != 0;
+  GraphState& g = s.graph;
+  for (uint32_t* t : {&g.t0, &g.t1, &g.learn_t1, &g.learn_t0, &g.learn_next, &g.plan, &g.expect}) *t = r.u32();
+  g.completed = r.u8() != 0;
+  g.planned = r.u8() != 0;
+  r.bytes(g.word, sizeof g.word);
+  g.wlen = r.i32();
+  g.overflow = r.u8() != 0;
+  g.capital = r.u8() != 0;
+  r.bytes(g.done_word, sizeof g.done_word);
+  g.done_len = r.i32();
+  if (g.wlen < 0 || g.wlen > GraphState::kMaxWord || g.done_len < 0 || g.done_len > GraphState::kMaxWord)
+    throw std::runtime_error("state file: bad graph state");
+  for (float& t : g.tree) t = r.f32();
+  g.tree_ready = r.u8() != 0;
+  g.n = r.u32();
+  g.zero_crossings = r.u32();
+  g.last_sign = r.i32();
+  g.sum_sq = r.f64();
+  g.prev_rms = r.f64();
   s.line_start = r.u64();
   s.prev_line_start = r.u64();
   s.widths.load(r);

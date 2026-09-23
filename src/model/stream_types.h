@@ -20,4 +20,33 @@ struct LstmState {
   bool ready = false;  // false until the first forward step
 };
 
+// The graph specialist's side of the context. Tokens are words (text),
+// 20 ms slice shapes (audio) or 8-pixel run shapes (images).
+struct GraphState {
+  static constexpr uint32_t kNone = 0xFFFFFFFFu;
+  static constexpr int kMaxWord = 31;
+  uint32_t t0 = kNone, t1 = kNone;  // last two finished tokens, newest t0
+  // Set by advance_byte when the byte just finished a token: the edge to learn.
+  bool completed = false;
+  uint32_t learn_t1 = kNone, learn_t0 = kNone, learn_next = kNone;
+  // Generation: the token planned for the current unit (kNone = none).
+  uint32_t plan = kNone;
+  bool planned = false;             // planning already tried for this unit
+  uint32_t expect = kNone;          // audio/image: the shape G expects now
+  // Text: the word in progress (lowercase) and the last finished word.
+  char word[kMaxWord + 1] = {};
+  int wlen = 0;
+  bool overflow = false;            // word too long to be a token
+  bool capital = true;              // next word likely starts with a capital
+  char done_word[kMaxWord + 1] = {};
+  int done_len = 0;
+  // Text: next-byte distribution from the graph, as a prefix-sum tree.
+  float tree[512] = {};
+  bool tree_ready = false;
+  // Audio: the current slice so far (channel 0).
+  uint32_t n = 0, zero_crossings = 0;
+  int last_sign = 0;
+  double sum_sq = 0, prev_rms = 0;
+};
+
 }  // namespace cmix

@@ -20,10 +20,11 @@ double bpb(double bits, uint64_t bytes) { return bytes ? bits / (double)bytes : 
 }  // namespace
 
 int cmd_train(int argc, char** argv, int start) {
-  Args a(argc, argv, start, {"state", "type", "table-bits", "width", "channels", "lstm"}, {});
+  Args a(argc, argv, start, {"state", "type", "table-bits", "width", "channels", "lstm", "graph-confirm"}, {"graph"});
   if (!a.has("state") || a.pos().empty())
     throw std::runtime_error(
         "usage: train --state <memory.bin> [--type text|image|audio|raw] [--table-bits 16..28] [--lstm N]\n"
+        "             [--graph [--graph-confirm N]]\n"
         "             [--width W --channels 1|3 (raw pixel files)] <file>...");
   const std::string path = a.str("state");
   // The data type decides how files are read; a new image/audio memory
@@ -79,6 +80,10 @@ int cmd_info(int argc, char** argv, int start) {
   std::printf("tables         2^%d slots (%d MB), history up to %d MB\n", m->config().table_bits,
               (int)((8ull << m->config().table_bits) >> 20), (int)((1ull << m->config().history_bits) >> 20));
   if (m->config().lstm_cells) std::printf("LSTM           %d cells\n", m->config().lstm_cells);
+  if (const TokenGraph* g = m->graph())
+    std::printf("graph          %zu nodes, %zu edges (%zu confirmed, needs %u sightings)%s\n", g->nodes(),
+                g->edges(false), g->edges(true), g->confirm(),
+                m->config().type == DataType::Text ? (", " + std::to_string(m->vocab().size()) + " words").c_str() : "");
   std::printf("specialists   ");
   for (int i = 0; i < m->num_inputs(); ++i) std::printf(" %s", m->input_name(i).c_str());
   std::printf("\n");

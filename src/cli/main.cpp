@@ -14,13 +14,15 @@ void usage() {
                "  cmix-bit decompress <in.cmxb> <out>\n"
                "  cmix-bit demo       [text]\n"
                "  cmix-bit train      --state <memory.bin> [--type text|image|audio|raw] [--table-bits 16..28] [--lstm N]\n"
+               "                      [--graph [--graph-confirm N]]\n"
                "                      [--width W --channels 1|3] <file>...\n"
                "  cmix-bit generate   <nbytes> [prompt] [--state memory.bin]... [--blend w1,w2,..] [--blend-mode mix|product]\n"
                "                      [--temp T] [--top-p P] [--top-k K] [--seed N]\n"
                "                      [--charset seen|utf8|ascii|any] [--novelty N]\n"
                "                      [--line-start CHARS | --acrostic WORD] [--max-line N]\n"
-               "                      [--words FILE] [--rhyme] [--best-of N] [--stats]\n"
+               "                      [--words FILE] [--rhyme] [--best-of N] [--graph-plan] [--stats]\n"
                "  cmix-bit info       <memory.bin>\n"
+               "  cmix-bit graph      <memory.bin> [word]\n"
                "  cmix-bit compare    [--type text|image|audio|raw] <fileA> <fileB>\n"
                "  cmix-bit write      --state <memory.bin> [--out text.txt] [--suggest N] [--no-save]\n";
 }
@@ -33,7 +35,7 @@ struct Command {
 const Command kCommands[] = {
     {"compress", cmix::cmd_compress}, {"decompress", cmix::cmd_decompress}, {"demo", cmix::cmd_demo},
     {"train", cmix::cmd_train},       {"generate", cmix::cmd_generate},     {"info", cmix::cmd_info},
-    {"compare", cmix::cmd_compare},   {"write", cmix::cmd_write},
+    {"compare", cmix::cmd_compare},   {"write", cmix::cmd_write},       {"graph", cmix::cmd_graph},
 };
 
 }  // namespace

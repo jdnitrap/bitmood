@@ -119,15 +119,50 @@ ByteMask Generator::allowed() const {
   return mask;
 }
 
+void Generator::plan_units() {
+  for (Source& s : src_) {
+    Model& m = *s.model;
+    if (!m.graph_can_plan(s.stream)) continue;
+    const auto cands = m.graph_candidates(s.stream);
+    double total = 0;
+    std::vector<double> w;
+    for (const auto& c : cands) {
+      w.push_back(std::pow(c.weight, 1.0 / opt_.temp));
+      total += w.back();
+    }
+    Token pick = kNoToken;
+    if (total > 0) {
+      double r = uniform() * total;
+      pick = cands.back().token;
+      for (size_t i = 0; i < cands.size(); ++i) {
+        if (r < w[i]) {
+          pick = cands[i].token;
+          break;
+        }
+        r -= w[i];
+      }
+    }
+    m.replan(s.stream, pick);
+  }
+}
+
 uint8_t Generator::next() {
+  if (opt_.plan) plan_units();
   ByteProbs model_p;
   distribution(model_p);
+  // Steer toward planned words: boost the byte that continues each source's plan.
+  ByteProbs steer = model_p;
+  if (opt_.plan && opt_.plan_strength > 0)
+    for (const Source& s : src_) {
+      const int c = s.model->plan_next_byte(s.stream);
+      if (c >= 0) steer[c] *= 1.0 + opt_.plan_strength;
+    }
   const ByteMask ok = allowed();
 
   // Candidates: allowed bytes with their temperature-adjusted weight.
   std::vector<std::pair<double, int>> cand;
   for (int c = 0; c < 256; ++c)
-    if (ok[c]) cand.push_back({std::pow(std::max(model_p[c], 1e-300), 1.0 / opt_.temp), c});
+    if (ok[c]) cand.push_back({std::pow(std::max(steer[c], 1e-300), 1.0 / opt_.temp), c});
   std::sort(cand.begin(), cand.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
   if (opt_.top_k > 0 && (int)cand.size() > opt_.top_k) cand.resize((size_t)opt_.top_k);
   double total = 0;

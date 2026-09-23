@@ -49,7 +49,8 @@ struct Stream {
   uint64_t line_start = 0;       // first byte of the current line
   uint64_t prev_line_start = 0;  // first byte of the line above
   WidthFinder widths;
-  LstmState lstm;  // level 2 specialist (only used when the model has one)
+  LstmState lstm;    // level 2 specialist (only used when the model has one)
+  GraphState graph;  // graph specialist (only used when the model has one)
 };
 
 }  // namespace cmix
