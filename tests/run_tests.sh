@@ -102,6 +102,11 @@ b2=$($BIN generate 200 "The " --state "$T/one.st" --best-of 4 --seed 6 | md5sum)
 check "--best-of 4 is repeatable with the same seed" "[ '$b1' = '$b2' ]"
 check "generate still leaves the memory untouched" "cmp -s '$T/one.st' '$T/two.st'"
 
+echo "interactive write"
+cp "$T/one.st" "$T/w.st"
+check "write: typing, Tab, backspace, arrow, Enter, save" "timeout 60 python3 tests/write_test.py $BIN '$T/w.st' '$T/w_out.txt' >/dev/null"
+check "write refuses to run without a terminal" "! $BIN write --state '$T/w.st' </dev/null 2>/dev/null"
+
 echo "grid views"
 words=(alpha beta gamma delta)
 for i in $(seq 400); do  # 23-byte records; the word and number vary without a longer period

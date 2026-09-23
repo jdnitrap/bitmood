@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "core/math.h"
+#include "model/session.h"
 
 namespace cmix {
 
@@ -146,6 +147,19 @@ uint8_t Generator::next() {
   out_.push_back((uint8_t)chosen);
   advance((uint8_t)chosen);
   return (uint8_t)chosen;
+}
+
+void Generator::learn_byte(uint8_t b) {
+  for (Source& s : src_) {
+    Session sess(*s.model, s.stream);
+    sess.learn_byte(b);
+    s.stream = sess.stream();
+  }
+  for (auto& c : constraints_) c->accept(b);
+}
+
+void Generator::ensure_room() {
+  for (Source& s : src_) s.model->history().make_room(kHistoryRoom);
 }
 
 void Generator::emit(uint8_t b, double bits) {

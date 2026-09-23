@@ -20,7 +20,8 @@ void usage() {
                "                      [--line-start CHARS | --acrostic WORD] [--max-line N]\n"
                "                      [--words FILE] [--rhyme] [--best-of N] [--stats]\n"
                "  cmix-bit info       <memory.bin>\n"
-               "  cmix-bit compare    [--type text] <fileA> <fileB>\n";
+               "  cmix-bit compare    [--type text] <fileA> <fileB>\n"
+               "  cmix-bit write      --state <memory.bin> [--out text.txt] [--suggest N] [--no-save]\n";
 }
 
 struct Command {
@@ -31,7 +32,7 @@ struct Command {
 const Command kCommands[] = {
     {"compress", cmix::cmd_compress}, {"decompress", cmix::cmd_decompress}, {"demo", cmix::cmd_demo},
     {"train", cmix::cmd_train},       {"generate", cmix::cmd_generate},     {"info", cmix::cmd_info},
-    {"compare", cmix::cmd_compare},
+    {"compare", cmix::cmd_compare},   {"write", cmix::cmd_write},
 };
 
 }  // namespace

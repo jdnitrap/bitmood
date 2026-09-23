@@ -62,6 +62,12 @@ class Generator {
   uint8_t next();
   // Emits a byte chosen elsewhere (replaying a best-of-N winner); `bits` is its model cost.
   void emit(uint8_t b, double bits);
+  // Teaches every source model a byte (interactive writing), then moves on.
+  void learn_byte(uint8_t b);
+  // Frees history room after the models have grown (call between snapshots).
+  void ensure_room();
+  const Stream& stream(size_t i) const { return src_[i].stream; }
+  Model& model(size_t i) { return *src_[i].model; }
   // New random stream (each best-of-N candidate gets its own).
   void reseed(uint64_t seed) { rng_.seed(seed); }
   // True if the constraints say output can't end here (e.g. mid UTF-8).

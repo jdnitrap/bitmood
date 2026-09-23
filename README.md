@@ -67,6 +67,18 @@ Creativity controls:
 Soft rules are relaxed in order when they conflict: novelty first, then
 rhyme, then line length. Charset, line start, acrostic and word list never are.
 
+Writing together with the model (in a terminal):
+
+```
+./cmix-bit write --state brain.bin --out draft.txt
+```
+
+The model's guess for what comes next appears in grey after the cursor.
+**Tab** accepts it, **→** accepts one word, **Backspace** edits the word
+you are on, **Ctrl-S** saves, **Ctrl-D** or **Esc** saves and quits. Each
+finished word (at a space, punctuation, Enter or an accepted suggestion)
+is learned, so the memory picks up your writing as you go.
+
 Grid views (the ImHex idea) and file comparison:
 
 ```
