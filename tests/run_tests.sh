@@ -107,6 +107,45 @@ cp "$T/one.st" "$T/w.st"
 check "write: typing, Tab, backspace, arrow, Enter, save" "timeout 60 python3 tests/write_test.py $BIN '$T/w.st' '$T/w_out.txt' >/dev/null"
 check "write refuses to run without a terminal" "! $BIN write --state '$T/w.st' </dev/null 2>/dev/null"
 
+echo "data types: image, audio, raw"
+python3 - "$T" <<'PY'
+import math, random, struct, sys
+d = sys.argv[1]; random.seed(3)
+def ppm(name, w, h, k):
+    px = bytearray()
+    for y in range(h):
+        for x in range(w):
+            px += bytes(max(0, min(255, int(v) + random.randint(-2, 2))) for v in
+                        (120 + 90 * math.sin(x / 9 + k), 60 + y, 40 + x))
+    open(f'{d}/{name}', 'wb').write(b'P6\n# test\n%d %d\n255\n' % (w, h) + px)
+ppm('a.ppm', 64, 48, 1); ppm('b.ppm', 64, 48, 2); ppm('narrow.ppm', 32, 48, 3)
+s = [int(8000 * math.sin(2 * math.pi * 220 * i / 8000) + random.gauss(0, 100)) for i in range(8000)]
+data = struct.pack('<%dh' % len(s), *s)
+open(f'{d}/tone.wav', 'wb').write(b'RIFF' + struct.pack('<I', 36 + len(data)) + b'WAVEfmt ' +
+    struct.pack('<IHHIIHH', 16, 1, 1, 8000, 16000, 2, 16) + b'data' + struct.pack('<I', len(data)) + data)
+PY
+for spec in "image a.ppm" "audio tone.wav" "raw a.ppm"; do
+  set -- $spec
+  $BIN compress --type $1 "$T/$2" "$T/typed.cmxb" 2>/dev/null && $BIN decompress "$T/typed.cmxb" "$T/typed.out" 2>/dev/null
+  check "--type $1 $2 round trip is byte-identical" "cmp -s '$T/$2' '$T/typed.out'"
+done
+img=$($BIN compress --type image "$T/a.ppm" "$T/i.cmxb" 2>&1 | awk '/^out/{print $2}')
+raw=$($BIN compress --type raw "$T/a.ppm" "$T/r.cmxb" 2>&1 | awk '/^out/{print $2}')
+check "telling it 'image' beats 'raw' on a picture ($img < $raw)" "[ $img -lt $raw ]"
+snd=$($BIN compress --type audio "$T/tone.wav" "$T/s.cmxb" 2>&1 | awk '/^out/{print $2}')
+raw=$($BIN compress --type raw "$T/tone.wav" "$T/r.cmxb" 2>&1 | awk '/^out/{print $2}')
+check "telling it 'audio' beats 'raw' on a sound ($snd < $raw)" "[ $snd -lt $raw ]"
+$BIN train --state "$T/img.st" --type image --table-bits 18 "$T/a.ppm" "$T/b.ppm" 2>/dev/null
+check "info shows the image shape" "$BIN info '$T/img.st' | grep -q '64 px wide, 3 channels'"
+check "an image of another width is rejected" "! $BIN train --state '$T/img.st' '$T/narrow.ppm' 2>/dev/null"
+$BIN generate --state "$T/img.st" --height 10 --out "$T/g.ppm" --seed 1
+check "image generation writes a 64x10 PPM" "[ \"\$(head -c 13 '$T/g.ppm' | tr '\n' ' ')\" = 'P6 64 10 255 ' ] && [ \$(stat -c%s '$T/g.ppm') -eq \$((13 + 64 * 10 * 3)) ]"
+$BIN train --state "$T/snd.st" --type audio --table-bits 18 "$T/tone.wav" 2>/dev/null
+$BIN generate --state "$T/snd.st" --seconds 0.25 --out "$T/g.wav" --seed 1
+check "audio generation writes a 0.25 s WAV" "[ \$(stat -c%s '$T/g.wav') -eq \$((44 + 2000 * 2)) ] && [ \"\$(head -c 4 '$T/g.wav')\" = RIFF ]"
+check "image output without --out is rejected" "! $BIN generate --state '$T/img.st' --height 2 >/dev/null 2>&1"
+check "a WAV is rejected as an image" "! $BIN compress --type image '$T/tone.wav' '$T/x' 2>/dev/null"
+
 echo "grid views"
 words=(alpha beta gamma delta)
 for i in $(seq 400); do  # 23-byte records; the word and number vary without a longer period

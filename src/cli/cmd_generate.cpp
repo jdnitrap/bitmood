@@ -6,25 +6,37 @@
 #include "cli/commands.h"
 #include "cli/common.h"
 #include "gen/best_of.h"
+#include "io/files.h"
+#include "io/formats.h"
 
 namespace cmix {
 
 int cmd_generate(int argc, char** argv, int start) {
   Args a(argc, argv, start, kGenValued, kGenFlags);
-  if (a.pos().empty() || a.pos().size() > 2)
-    throw std::runtime_error(
-        "usage: generate <nbytes> [prompt] [--state memory.bin]... [--blend w1,w2,..] [--blend-mode mix|product]\n"
-        "       [--temp T] [--top-p P] [--top-k K] [--seed N] [--charset seen|utf8|ascii|any]\n"
-        "       [--novelty N] [--line-start CHARS | --acrostic WORD] [--max-line N]\n"
-        "       [--words FILE] [--rhyme] [--best-of N] [--stats]");
-  const long long n = std::stoll(a.pos()[0]);
-  if (n < 0) throw std::runtime_error("nbytes must be >= 0");
-  const std::string prompt = a.pos().size() == 2 ? a.pos()[1] : "The quick brown fox ";
+  const char* usage =
+      "usage: generate <nbytes> [prompt] [--state memory.bin]... [--blend w1,w2,..] [--blend-mode mix|product]\n"
+      "       [--temp T] [--top-p P] [--top-k K] [--seed N] [--charset seen|utf8|ascii|any]\n"
+      "       [--novelty N] [--line-start CHARS | --acrostic WORD] [--max-line N]\n"
+      "       [--words FILE] [--rhyme] [--best-of N] [--stats]\n"
+      "   image memory: generate --state img.bin --height H --out new.ppm\n"
+      "   audio memory: generate --state snd.bin --seconds S --out new.wav\n"
+      "   raw memory:   generate <nbytes> --state raw.bin [--out file]";
+  if (a.pos().size() > 2) throw std::runtime_error(usage);
+  // Text prompt: given, or the classic default when only nbytes is given.
+  const std::string prompt = a.pos().size() == 2 ? a.pos()[1] : (a.pos().empty() ? "" : "The quick brown fox ");
   const bool stats = a.has("stats");
   const long long best_of = a.integer("best-of", 1);
   if (best_of < 1) throw std::runtime_error("--best-of must be >= 1");
 
   GenSetup setup = load_sources(a, prompt, stats || a.has("novelty") || best_of > 1);
+  const Config cfg = setup.models[0]->config();
+  long long n = a.pos().empty() ? -1 : std::stoll(a.pos()[0]);
+  if (cfg.type == DataType::Image && a.has("height")) n = a.integer("height", 0) * cfg.row_bytes();
+  if (cfg.type == DataType::Audio && a.has("seconds"))
+    n = (long long)(a.num("seconds", 0) * cfg.sample_rate) * 2 * cfg.channels;
+  if (n < 0) throw std::runtime_error(usage);
+  if ((cfg.type == DataType::Image || cfg.type == DataType::Audio) && !a.has("out"))
+    throw std::runtime_error(std::string(type_name(cfg.type)) + " output needs --out FILE");
   const GenOptions opt = gen_options(a);
   Generator gen(setup.sources, opt);
   add_standard_constraints(gen, a, setup);
@@ -53,9 +65,13 @@ int cmd_generate(int argc, char** argv, int start) {
   }
 
   const auto& out = gen.output();
-  std::cout << prompt;
-  std::cout.write((const char*)out.data(), (std::streamsize)out.size());
-  std::cout << "\n";
+  if (a.has("out")) {
+    write_file_atomic(a.str("out"), make_container(cfg, out));
+  } else {
+    std::cout << prompt;
+    std::cout.write((const char*)out.data(), (std::streamsize)out.size());
+    if (cfg.type == DataType::Text) std::cout << "\n";
+  }
 
   if (stats) {
     CopyMeter meter(setup.training);

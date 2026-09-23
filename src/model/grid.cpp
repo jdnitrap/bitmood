@@ -69,6 +69,7 @@ std::string view_label(const View& v, const Stream& s) {
       return w ? "width " + std::to_string(w) : "no width yet";
     }
     case ViewKind::Word: return "word " + std::to_string(v.param);
+    case ViewKind::Fixed: return "row " + std::to_string(v.param);
   }
   return "?";
 }
@@ -91,10 +92,13 @@ GridCell grid_cell(const View& v, const History& h, const Stream& s) {
     return c;
   }
   const int w = v.kind == ViewKind::Auto ? s.widths.width[v.param] : v.param;
-  if (w <= 0 || pos < (uint64_t)w) return c;
+  // Fixed rows and words count from the start of the current record (an
+  // image or a sound), so columns line up with pixels and samples.
+  const uint64_t rel = pos - std::min(pos, s.record_start);
+  if (w <= 0 || rel < (uint64_t)w) return c;
   c.valid = true;
   c.width = w;
-  c.col = (int)(pos % (uint64_t)w);
+  c.col = (int)std::min<uint64_t>(rel % (uint64_t)w, 1023);
   c.above = byte_at(pos - w, pos);
   c.above_right = byte_at(pos - w + 1, pos);
   return c;

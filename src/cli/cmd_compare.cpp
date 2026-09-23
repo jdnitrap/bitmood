@@ -13,6 +13,7 @@
 #include "cli/commands.h"
 #include "core/math.h"
 #include "io/files.h"
+#include "io/formats.h"
 #include "model/session.h"
 
 namespace cmix {
@@ -75,9 +76,11 @@ std::string best_view_label(const Model& m, const Stream& s) {
   return v == 0 ? "no grid" : view_label(m.grid().view(v - 1), s);
 }
 
-// Learns `data` with session s; returns bits spent. Optionally fills the report.
+// Learns `data` with session s as one record; returns bits spent.
+// Optionally fills the report.
 double learn_all(Session& s, const std::vector<uint8_t>& data, Report* r) {
   Model& m = s.model();
+  s.begin_record();
   const int n = m.num_inputs();
   SegmentBuilder segs;
   std::vector<std::pair<std::string, uint64_t>> wins;
@@ -128,32 +131,41 @@ double per_byte(double bits, uint64_t n) { return n ? bits / (double)n : 0.0; }
 }  // namespace
 
 int cmd_compare(int argc, char** argv, int start) {
-  Args a(argc, argv, start, {"type"}, {});
-  if (a.pos().size() != 2) throw std::runtime_error("usage: compare [--type text] <fileA> <fileB>");
-  Config cfg;
-  cfg.type = parse_type(a.str("type", "text"));
-  Config no_grid = cfg;
-  no_grid.grid = false;
+  Args a(argc, argv, start, {"type", "width", "channels"}, {});
+  if (a.pos().size() != 2)
+    throw std::runtime_error("usage: compare [--type text|image|audio|raw] [--width W --channels C] <fileA> <fileB>");
+  Config base;
+  base.type = parse_type(a.str("type", "text"));
+  base.width = (int)a.integer("width", 0);
+  base.channels = (int)a.integer("channels", 0);
 
-  std::vector<uint8_t> data[2] = {read_file(a.pos()[0]), read_file(a.pos()[1])};
+  std::vector<uint8_t> data[2];
+  Config cfg[2] = {base, base};
   Report rep[2];
   for (int f = 0; f < 2; ++f) {
+    TypedData d = read_typed(a.pos()[f], base.type, true);
+    apply_shape(cfg[f], d, true, a.pos()[f]);
+    data[f] = std::move(d.payload);
     rep[f].name = base_name(a.pos()[f]);
     rep[f].bytes = data[f].size();
     {
-      Model m(cfg);
+      Model m(cfg[f]);
       Session s(m);
       rep[f].bits = learn_all(s, data[f], &rep[f]);
     }
     {
+      Config no_grid = cfg[f];
+      no_grid.grid = false;
       Model m(no_grid);
       Session s(m);
       rep[f].bits_no_grid = learn_all(s, data[f], nullptr);
     }
   }
-  double cross[2];  // cross[f]: bits for file f after first learning the other file
-  for (int f = 0; f < 2; ++f) {
-    Model m(cfg);
+  // cross[f]: bits for file f after first learning the other file (same shape only).
+  const bool same_shape = cfg[0].width == cfg[1].width && cfg[0].channels == cfg[1].channels;
+  double cross[2] = {0, 0};
+  for (int f = 0; f < 2 && same_shape; ++f) {
+    Model m(cfg[f]);
     Session s(m);
     learn_all(s, data[1 - f], nullptr);
     cross[f] = learn_all(s, data[f], nullptr);
@@ -209,7 +221,8 @@ int cmd_compare(int argc, char** argv, int start) {
   }
 
   std::printf("\ncross-file (does learning one file help the other?):\n");
-  for (int f = 0; f < 2; ++f) {
+  if (!same_shape) std::printf("  skipped: the files have different shapes\n");
+  for (int f = 0; f < 2 && same_shape; ++f) {
     double cold = per_byte(rep[f].bits, rep[f].bytes), warm = per_byte(cross[f], rep[f].bytes);
     std::printf("  %-24s cold %.3f  after %-24s %.3f bits/byte  (%+.1f%%)\n", rep[f].name.c_str(), cold,
                 rep[1 - f].name.c_str(), warm, cold > 0 ? 100.0 * (warm - cold) / cold : 0.0);

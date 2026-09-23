@@ -6,6 +6,7 @@
 //           "column count" slider, found by measuring which distance
 //           between equal bytes is most common)
 //   Word  - fixed width of 2, 4 or 8 bytes (16/32/64-bit word views)
+//   Fixed - a known row width (an image row)
 //
 // For the byte being predicted, a view gives its column and the byte
 // directly above it (same column, previous row). The Grid specialist turns
@@ -23,11 +24,11 @@
 
 namespace cmix {
 
-enum class ViewKind : uint8_t { Line = 0, Auto = 1, Word = 2 };
+enum class ViewKind : uint8_t { Line = 0, Auto = 1, Word = 2, Fixed = 3 };
 
 struct View {
   ViewKind kind;
-  int param;  // Auto: slot 0/1 in WidthFinder; Word: width in bytes
+  int param;  // Auto: slot 0/1 in WidthFinder; Word, Fixed: width in bytes
 };
 
 // Where the current byte sits in a view's grid.
@@ -39,7 +40,7 @@ struct GridCell {
   int width = 0;       // row width (0 for line rows, which vary)
 };
 
-// Describes view `v` in words, e.g. "line rows", "width 24", "word 4".
+// Describes view `v` in words, e.g. "line rows", "width 24", "word 4", "row 192".
 std::string view_label(const View& v, const Stream& s);
 // Like view_label but stable over time: "line rows", "auto width 1", "word 4".
 std::string view_name(const View& v);

@@ -12,6 +12,8 @@
 //   O0, D1, A (order 2), D3, D4, D5, D6, D8  order-N contexts
 //   W1, W2                                   words (text)
 //   C1, C2                                   byte classes (learned MDBE flags)
+//   I1..I6                                   image: neighbouring pixels (image)
+//   S1..S4                                   audio: earlier samples (audio)
 //   E..                                      grid views, two votes each
 //   B1, B2                                   long match
 //   bias
@@ -84,6 +86,9 @@ class Model {
   int predict(const Stream& s, BitPos bp, Votes& v) const;
   void learn(const Stream& s, BitPos bp, const Votes& v, int bit);
   void advance_byte(Stream& s, uint8_t b);
+  // Marks the start of a new record (an image or a sound) at the current
+  // position, so pixel and sample positions count from here.
+  void begin_record(Stream& s) const { s.record_start = hist_.end(); }
 
   History& history() { return hist_; }
   const History& history() const { return hist_; }
@@ -104,6 +109,9 @@ class Model {
 
  private:
   void contexts(const Stream& s, uint64_t* out) const;  // byte-level hashes of table inputs
+  void image_contexts(const Stream& s, uint64_t* out) const;
+  void audio_contexts(const Stream& s, uint64_t* out) const;
+  int typed_first_ = 0;  // first image/audio input
 
   Config cfg_;
   History hist_;

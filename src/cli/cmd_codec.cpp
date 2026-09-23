@@ -1,5 +1,10 @@
 // compress / decompress.
-// Format: "CMX2" | data type (u8) | original length (u64, big-endian) | payload.
+//
+// Format "CMX3":
+//   magic "CMX3" | type u8 | width u32 | channels u8 | sample rate u32 (little-endian)
+//   | container header length u32 | container header bytes (PNM / WAV header, kept as is)
+//   | payload length u64 | coded payload
+// The model learns and codes only the payload (text, pixels, samples).
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -7,40 +12,41 @@
 #include "cli/args.h"
 #include "cli/commands.h"
 #include "coder/arith.h"
+#include "core/serial.h"
 #include "io/files.h"
+#include "io/formats.h"
 #include "model/session.h"
 
 namespace cmix {
 
-namespace {
-
-constexpr size_t kHeader = 13;
-
-void put_u64_be(std::vector<uint8_t>& o, uint64_t v) {
-  for (int i = 7; i >= 0; --i) o.push_back((uint8_t)(v >> (i * 8)));
-}
-
-uint64_t get_u64_be(const uint8_t* p) {
-  uint64_t v = 0;
-  for (int i = 0; i < 8; ++i) v = (v << 8) | p[i];
-  return v;
-}
-
-}  // namespace
-
 int cmd_compress(int argc, char** argv, int start) {
-  Args a(argc, argv, start, {"type"}, {});
-  if (a.pos().size() != 2) throw std::runtime_error("usage: compress [--type text] <in> <out.cmxb>");
+  Args a(argc, argv, start, {"type", "width", "channels"}, {});
+  if (a.pos().size() != 2)
+    throw std::runtime_error("usage: compress [--type text|image|audio|raw] [--width W --channels C] <in> <out.cmxb>");
   Config cfg;
   cfg.type = parse_type(a.str("type", "text"));
-  std::vector<uint8_t> data = read_file(a.pos()[0]);
-  std::vector<uint8_t> out = {'C', 'M', 'X', '2', (uint8_t)cfg.type};
-  put_u64_be(out, data.size());
+  cfg.width = (int)a.integer("width", 0);
+  cfg.channels = (int)a.integer("channels", 0);
+  const TypedData d = read_typed(a.pos()[0], cfg.type, true);
+  apply_shape(cfg, d, true, a.pos()[0]);
+  cfg.sample_rate = d.sample_rate;
+
+  Writer w;
+  w.tag("CMX3");
+  w.u8((uint8_t)cfg.type);
+  w.u32((uint32_t)cfg.width);
+  w.u8((uint8_t)cfg.channels);
+  w.u32((uint32_t)cfg.sample_rate);
+  w.u32((uint32_t)d.header.size());
+  w.bytes(d.header.data(), d.header.size());
+  w.u64(d.payload.size());
+  std::vector<uint8_t> out = w.data();
 
   Model m(cfg);
   Session s(m);
+  s.begin_record();
   Encoder enc(out);
-  for (uint8_t b : data) {
+  for (uint8_t b : d.payload) {
     for (int k = 7; k >= 0; --k) {
       int bit = (b >> k) & 1;
       enc.encode(bit, s.predict());
@@ -49,7 +55,7 @@ int cmd_compress(int argc, char** argv, int start) {
   }
   enc.flush();
   write_file_atomic(a.pos()[1], out);
-  std::cerr << "in  " << data.size() << " bytes\n";
+  std::cerr << "in  " << d.header.size() + d.payload.size() << " bytes\n";
   std::cerr << "out " << out.size() << " bytes (header+payload)\n";
   return 0;
 }
@@ -57,21 +63,40 @@ int cmd_compress(int argc, char** argv, int start) {
 int cmd_decompress(int argc, char** argv, int start) {
   Args a(argc, argv, start, {}, {});
   if (a.pos().size() != 2) throw std::runtime_error("usage: decompress <in.cmxb> <out>");
-  std::vector<uint8_t> in = read_file(a.pos()[0]);
-  if (in.size() >= 4 && std::memcmp(in.data(), "CMXB", 4) == 0)
-    throw std::runtime_error(a.pos()[0] + " was made by an older version (before phase 5) and cannot be read");
-  if (in.size() < kHeader || std::memcmp(in.data(), "CMX2", 4) != 0)
-    throw std::runtime_error(a.pos()[0] + ": not a CMX2 file");
-  if (in[4] > (uint8_t)DataType::Raw) throw std::runtime_error(a.pos()[0] + ": unknown data type");
+  const std::string& path = a.pos()[0];
+  std::vector<uint8_t> in = read_file(path);
+  if (in.size() >= 4 && (std::memcmp(in.data(), "CMXB", 4) == 0 || std::memcmp(in.data(), "CMX2", 4) == 0))
+    throw std::runtime_error(path + " was made by an older version of cmix-bit and cannot be read");
+  if (in.size() < 4 || std::memcmp(in.data(), "CMX3", 4) != 0) throw std::runtime_error(path + ": not a CMX3 file");
+
   Config cfg;
-  cfg.type = (DataType)in[4];
-  const uint64_t n = get_u64_be(in.data() + 5);
+  std::vector<uint8_t> out;
+  uint64_t n = 0;
+  size_t payload_at = 0;
+  try {
+    Reader r(in.data(), in.size());
+    r.expect_tag("CMX3");
+    const uint8_t t = r.u8();
+    if (t > (uint8_t)DataType::Raw) throw std::runtime_error("unknown data type");
+    cfg.type = (DataType)t;
+    cfg.width = (int)r.u32();
+    cfg.channels = r.u8();
+    cfg.sample_rate = (int)r.u32();
+    const uint32_t hlen = r.u32();
+    if (hlen > r.remaining()) throw std::runtime_error("truncated");
+    out.resize(hlen);
+    r.bytes(out.data(), hlen);
+    n = r.u64();
+    payload_at = in.size() - r.remaining();
+  } catch (const std::runtime_error& e) {
+    throw std::runtime_error(path + ": " + e.what());
+  }
 
   Model m(cfg);
   Session s(m);
-  Decoder dec(in.data() + kHeader, in.size() - kHeader);
-  std::vector<uint8_t> out;
-  out.reserve((size_t)std::min<uint64_t>(n, 1u << 30));
+  s.begin_record();
+  Decoder dec(in.data() + payload_at, in.size() - payload_at);
+  out.reserve(out.size() + (size_t)std::min<uint64_t>(n, 1u << 30));
   for (uint64_t i = 0; i < n; ++i) {
     int b = 0;
     for (int k = 0; k < 8; ++k) {
@@ -82,7 +107,7 @@ int cmd_decompress(int argc, char** argv, int start) {
     out.push_back((uint8_t)b);
   }
   write_file_atomic(a.pos()[1], out);
-  std::cerr << "wrote " << n << " bytes\n";
+  std::cerr << "wrote " << out.size() << " bytes\n";
   return 0;
 }
 

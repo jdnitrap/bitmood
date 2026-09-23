@@ -20,6 +20,9 @@ class Session {
   // Move on without learning (generation, seeding a loaded memory).
   void skip_bit(int bit);
 
+  // Starts a new record (image, sound) at the current position.
+  void begin_record() { m_.begin_record(s_); }
+
   // Whole-byte helpers.
   double learn_byte(uint8_t b);
   void feed_byte(uint8_t b);

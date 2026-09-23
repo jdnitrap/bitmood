@@ -96,11 +96,41 @@ set, so different regions of a file learn different trust. `compare` shows
 bits per byte with and without the grid, each specialist alone, the
 segments where each view won, and whether learning one file helps the other.
 
+### Data types
+
+The model always learns from bytes; `--type` tells it what the bytes are,
+which decides where it looks first and keeps each kind in its own memory:
+
+| Type | Files | Extra specialist | Grid views |
+|---|---|---|---|
+| `text` (default) | anything | W (words) | line rows, 2 auto widths |
+| `image` | binary PGM/PPM (P5/P6, 8-bit), or raw pixels with `--width W --channels 1\|3` | I1–I6: left, above, their average, gradient, neighbourhood, colour/vertical trend | image row, one pixel, auto width |
+| `audio` | 16-bit PCM WAV, mono or stereo | S1–S4: last sample, linear and curve trends, level (low/high byte aware) | 16-bit sample, frame, auto width |
+| `raw` | anything | none | line rows, 2 auto widths, 16/32/64-bit words |
+
+```
+./cmix-bit train --state pics.bin --type image a.ppm b.ppm
+./cmix-bit generate --state pics.bin --height 96 --out new.ppm --temp 0.7
+./cmix-bit train --state sound.bin --type audio tone.wav
+./cmix-bit generate --state sound.bin --seconds 2 --out new.wav --temp 0.5
+./cmix-bit compress --type image a.ppm a.cmxb          # header kept, pixels modelled
+./cmix-bit compare --type raw prog_a prog_b
+```
+
+The file header (PNM/WAV) is set aside; only pixels or samples are learned,
+and each file starts at pixel/sample 0. On test data the type label alone
+makes a picture 20% smaller and a sound 14% smaller than `--type raw`.
+Generated images keep the training pictures' palette and smooth regions;
+generated audio is the weakest output (mostly noise shaped by the tone).
+On a compiled program, `compare --type raw` finds the 24-byte ELF symbol
+records and 64-bit pointer regions on its own.
+
 ### The engine
 
 | Specialist | Looks at |
 |---|---|
 | O0, D1, **A** (order 2), D3, D4, D5, D6, D8 | the last 0–8 bytes |
+| I1–I6, S1–S4 | neighbouring pixels (image), earlier samples (audio) |
 | W1, W2 | the word in progress; it plus the previous word (text) |
 | C1, C2 | byte classes of the last bytes (the MDBE flags: letter, digit, space, punctuation, UTF-8…), learned, plus column |
 | E | grid views (above) |

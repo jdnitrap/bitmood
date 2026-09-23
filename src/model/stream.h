@@ -42,6 +42,8 @@ struct Stream {
   // Long match: absolute history position of the byte it predicts next.
   uint64_t match_ptr = 0;
   uint32_t match_len = 0;
+  // Where the current record (image, sound) started, absolute.
+  uint64_t record_start = 0;
   // Line rows (absolute history positions).
   uint64_t line_start = 0;       // first byte of the current line
   uint64_t prev_line_start = 0;  // first byte of the line above

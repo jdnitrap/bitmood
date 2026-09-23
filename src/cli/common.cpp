@@ -10,16 +10,27 @@
 
 namespace cmix {
 
-std::unique_ptr<Model> open_or_create(const std::string& path, const Args& a, Stream& s, bool& created) {
+Config config_from_args(const Args& a) {
+  Config cfg;
+  cfg.type = parse_type(a.str("type", "text"));
+  if (a.has("table-bits")) {
+    long long b = a.integer("table-bits", 22);
+    if (b < 16 || b > 28) throw std::runtime_error("--table-bits must be 16..28");
+    cfg.table_bits = (int)b;
+  }
+  if (a.has("width")) cfg.width = (int)a.integer("width", 0);
+  if (a.has("channels")) cfg.channels = (int)a.integer("channels", 0);
+  if (a.has("sample-rate")) cfg.sample_rate = (int)a.integer("sample-rate", 0);
+  return cfg;
+}
+
+std::unique_ptr<Model> open_or_create(const std::string& path, const Args& a, Stream& s, bool& created,
+                                      const TypedData* first) {
   created = !file_exists(path);
   if (created) {
-    Config cfg;
-    cfg.type = parse_type(a.str("type", "text"));
-    if (a.has("table-bits")) {
-      long long b = a.integer("table-bits", 22);
-      if (b < 16 || b > 28) throw std::runtime_error("--table-bits must be 16..28");
-      cfg.table_bits = (int)b;
-    }
+    Config cfg = config_from_args(a);
+    if (first) apply_shape(cfg, *first, true, "the first file");
+    else if (cfg.type == DataType::Image || cfg.type == DataType::Audio) apply_shape(cfg, TypedData(), true, "");
     s = Stream();
     return std::make_unique<Model>(cfg);
   }
@@ -75,8 +86,10 @@ GenSetup load_sources(const Args& a, const std::string& prompt, bool need_traini
       text.insert(text.end(), m->history().data().begin(), m->history().data().end());
       text.push_back(0);  // separator so no copy spans two memories
     }
-    // With a memory the prompt only sets the context.
+    // With a memory the prompt only sets the context. Images and sounds
+    // start a new record: generation begins at pixel / sample 0.
     Session s(*m, st);
+    if (m->config().type == DataType::Image || m->config().type == DataType::Audio) s.begin_record();
     for (unsigned char ch : prompt) s.feed_byte(ch);
     g.sources.push_back({m.get(), s.stream(), weights[i]});
     g.models.push_back(std::move(m));
@@ -105,7 +118,8 @@ void add_standard_constraints(Generator& g, const Args& a, const GenSetup& setup
   ByteMask seen{};
   for (const Source& s : setup.sources)
     for (uint8_t b : s.model->history().data()) seen[b] = true;
-  g.add_constraint(std::make_unique<CharsetFilter>(CharsetFilter::parse(a.str("charset", "seen")), seen));
+  const bool text = setup.sources[0].model->config().type == DataType::Text;
+  g.add_constraint(std::make_unique<CharsetFilter>(CharsetFilter::parse(a.str("charset", text ? "seen" : "any")), seen));
   const long long novelty = a.integer("novelty", 0);
   if (novelty < 0) throw std::runtime_error("--novelty must be >= 0");
   if (novelty > 0) g.add_constraint(std::make_unique<NoveltyFilter>(setup.training, (int)novelty));
@@ -126,7 +140,8 @@ void add_shape_constraints(Generator& g, const Args& a) {
 
 const std::set<std::string> kGenValued = {"state",   "blend",      "blend-mode", "temp",     "top-p",    "top-k",
                                           "seed",    "charset",    "novelty",  "line-start", "acrostic",
-                                          "max-line", "words",     "best-of"};
+                                          "max-line", "words",     "best-of",  "out",      "height",
+                                          "seconds"};
 const std::set<std::string> kGenFlags = {"stats", "rhyme"};
 
 }  // namespace cmix

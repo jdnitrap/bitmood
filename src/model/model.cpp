@@ -61,7 +61,8 @@ Model::Model(const Config& cfg)
     : cfg_(cfg),
       hist_(size_t(1) << cfg.history_bits),
       grid_(cfg.views()),
-      n_ctx_(kOrderInputs + (cfg.words() ? 2 : 0) + 2 + grid_.num_inputs()),
+      n_ctx_(kOrderInputs + (cfg.words() ? 2 : 0) + 2 + cfg.image_inputs() + cfg.audio_inputs() +
+             grid_.num_inputs()),
       grid_first_(n_ctx_ - grid_.num_inputs()),
       match_first_(n_ctx_),
       bias_(n_ctx_ + MatchModel::kInputs),
@@ -72,6 +73,10 @@ Model::Model(const Config& cfg)
       apm1_(256),
       apm2_(257 * 256) {
   if (n_inputs_ > kMaxInputs) throw std::runtime_error("too many model inputs");
+  typed_first_ = grid_first_ - cfg.image_inputs() - cfg.audio_inputs();
+  if (cfg.type == DataType::Image && (cfg.width <= 0 || cfg.channels <= 0))
+    throw std::runtime_error("image model needs width and channels");
+  if (cfg.type == DataType::Audio && cfg.channels <= 0) throw std::runtime_error("audio model needs channels");
   mix_.emplace_back(n_inputs_, 4 * 8, 0.2f);                         // match state x bit position
   mix_.emplace_back(n_inputs_, 257, 0.2f);                           // previous byte
   mix_.emplace_back(n_inputs_, (grid_.num_views() + 1) * 8, 0.2f);  // winning grid view x bit position
@@ -87,6 +92,8 @@ std::string Model::input_name(int i) const {
   }
   if (i == k) return "C1";
   if (i == k + 1) return "C2";
+  if (i >= typed_first_ && i < grid_first_)
+    return (cfg_.type == DataType::Image ? "I" : "S") + std::to_string(i - typed_first_ + 1);
   if (i >= grid_first_ && i < match_first_) {
     int g = i - grid_first_;
     return "E" + std::to_string(g / 2) + (g % 2 ? "r" : "u");
@@ -106,6 +113,13 @@ std::string Model::input_label(int i) const {
   }
   if (i == k) return "C byte classes";
   if (i == k + 1) return "C classes + column";
+  if (i >= typed_first_ && i < grid_first_) {
+    static const char* image[6] = {"I left pixel",       "I pixel above",       "I left+above average",
+                                   "I gradient L+U-UL",  "I neighbourhood",     "I colour / vertical trend"};
+    static const char* audio[4] = {"S last sample", "S linear trend", "S curve trend", "S level"};
+    const int j = i - typed_first_;
+    return cfg_.type == DataType::Image ? image[j] : audio[j];
+  }
   if (i >= grid_first_ && i < match_first_) {
     int g = i - grid_first_;
     return "E " + view_name(grid_.view(g / 2)) + (g % 2 ? " (row)" : " (above)");
@@ -125,7 +139,68 @@ void Model::contexts(const Stream& s, uint64_t* out) const {
   const uint64_t col = std::min<uint64_t>(hist_.end() - s.line_start, 63);
   out[k++] = hash_add(0xC101, s.classes & 0xFFF);
   out[k++] = hash_add(hash_add(0xC202, s.classes & 0xFF), col);
+  if (cfg_.type == DataType::Image) image_contexts(s, out + k);
+  if (cfg_.type == DataType::Audio) audio_contexts(s, out + k);
+  k += cfg_.image_inputs() + cfg_.audio_inputs();
   grid_.contexts(hist_, s, out + k);
+}
+
+namespace {
+inline int clamp255(int v) { return v < 0 ? 0 : (v > 255 ? 255 : v); }
+}  // namespace
+
+void Model::image_contexts(const Stream& s, uint64_t* out) const {
+  const uint64_t pos = hist_.end();
+  const uint64_t rel = pos - std::min(pos, s.record_start);
+  const int c = cfg_.channels, row = cfg_.row_bytes();
+  // Byte `back` positions ago in this image, or 0 before its start.
+  auto px = [&](uint64_t back) -> int {
+    return (back >= 1 && back <= rel && hist_.has(pos - back)) ? hist_.at(pos - back) : 0;
+  };
+  const uint64_t ch = rel % (uint64_t)c;
+  const uint64_t x = (rel / (uint64_t)c) % (uint64_t)cfg_.width;
+  const int W = px((uint64_t)c), N = px((uint64_t)row), NW = px((uint64_t)(row + c));
+  const int NE = x + 1 < (uint64_t)cfg_.width ? px((uint64_t)(row - c)) : N;
+  const int NN = px(2 * (uint64_t)row);
+  out[0] = hash_add(hash_add(0x1A1, (uint64_t)W), ch);
+  out[1] = hash_add(hash_add(0x1A2, (uint64_t)N), ch);
+  out[2] = hash_add(hash_add(0x1A3, (uint64_t)((W + N + 1) / 2)), ch);
+  out[3] = hash_add(hash_add(0x1A4, (uint64_t)clamp255(W + N - NW)), ch);
+  out[4] = hash_add(hash_add(hash_add(hash_add(0x1A5, (uint64_t)(W >> 3)), (uint64_t)(N >> 3)), (uint64_t)(NE >> 3)), ch);
+  // Colour: this channel follows the previous channel's change from the left pixel.
+  // Grey (or the first channel): the vertical trend 2N - NN.
+  const int trend = ch > 0 ? clamp255(px(1) + W - px((uint64_t)c + 1)) : clamp255(2 * N - NN);
+  out[5] = hash_add(hash_add(0x1A6, (uint64_t)trend), ch);
+}
+
+void Model::audio_contexts(const Stream& s, uint64_t* out) const {
+  const uint64_t pos = hist_.end();
+  const uint64_t rel = pos - std::min(pos, s.record_start);
+  const uint64_t frame = 2 * (uint64_t)cfg_.channels;
+  const uint64_t hi = rel & 1;  // 0: low byte next, 1: high byte next (little-endian)
+  const uint64_t ch = (rel / 2) % (uint64_t)cfg_.channels;
+  const uint64_t sample_start = rel - hi;  // relative position of this sample's low byte
+  // Earlier samples of the same channel (k = 1, 2, 3 frames back), 0 before the start.
+  auto sample = [&](uint64_t k) -> int {
+    if (sample_start < k * frame) return 0;
+    const uint64_t at = pos - (rel - (sample_start - k * frame));
+    if (!hist_.has(at) || !hist_.has(at + 1)) return 0;
+    return (int16_t)(hist_.at(at) | (hist_.at(at + 1) << 8));
+  };
+  const int s1 = sample(1), s2 = sample(2), s3 = sample(3);
+  const int pred[3] = {s1, 2 * s1 - s2, 3 * s1 - 3 * s2 + s3};
+  for (int k = 0; k < 3; ++k) {
+    const int p = std::max(-32768, std::min(32767, pred[k]));
+    uint64_t v;
+    if (!hi) {
+      v = (uint64_t)(p & 0xFF);  // expected low byte
+    } else {
+      const int low = hist_.back(0);  // the low byte just decided
+      v = (uint64_t)(((p - low + 128) >> 8) & 0xFF);  // expected high byte given it
+    }
+    out[k] = hash_add(hash_add(hash_add(0x5A0 + (uint64_t)k, v), hi), ch);
+  }
+  out[3] = hash_add(hash_add(hash_add(0x5A4, hi), ch), (uint64_t)((s1 + 32768) >> 10));
 }
 
 int Model::predict(const Stream& s, BitPos bp, Votes& v) const {

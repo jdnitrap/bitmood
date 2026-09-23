@@ -15,6 +15,9 @@ void save_config(Writer& w, const Config& c) {
   w.u8(c.grid ? 1 : 0);
   w.u8((uint8_t)c.table_bits);
   w.u8((uint8_t)c.history_bits);
+  w.u32((uint32_t)c.width);
+  w.u8((uint8_t)c.channels);
+  w.u32((uint32_t)c.sample_rate);
 }
 
 Config load_config(Reader& r) {
@@ -26,6 +29,9 @@ Config load_config(Reader& r) {
   c.grid = r.u8() != 0;
   c.table_bits = r.u8();
   c.history_bits = r.u8();
+  c.width = (int)r.u32();
+  c.channels = r.u8();
+  c.sample_rate = (int)r.u32();
   if (c.table_bits < 16 || c.table_bits > 30 || c.history_bits < 16 || c.history_bits > 32)
     throw std::runtime_error("state file: bad table or history size");
   return c;
@@ -41,6 +47,7 @@ void save_stream(Writer& w, const Stream& s) {
   w.u32(s.classes);
   w.u64(s.match_ptr);
   w.u32(s.match_len);
+  w.u64(s.record_start);
   w.u64(s.line_start);
   w.u64(s.prev_line_start);
   s.widths.save(w);
@@ -57,6 +64,7 @@ Stream load_stream(Reader& r) {
   s.classes = r.u32();
   s.match_ptr = r.u64();
   s.match_len = r.u32();
+  s.record_start = r.u64();
   s.line_start = r.u64();
   s.prev_line_start = r.u64();
   s.widths.load(r);
