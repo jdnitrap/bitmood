@@ -9,9 +9,10 @@ This is not a new invention. It's the core idea behind the best lossless
 compressors in the world (PAQ, cmix, zpaq). Those tools compress better than
 zip/gzip largely *because* of this trick, not because of a bigger neural net.
 
-**Session notes (2026-09-22):** see [CONVERSATION.md](CONVERSATION.md) — C++ prototype
-results, learn vs retain, generative writer without a transformer, graph specialist,
-positives/negatives.
+**Session notes:** see [CONVERSATION.md](CONVERSATION.md) — 2026-09-22: C++ prototype,
+learn vs retain, generative writer without a transformer, graph specialist;
+2026-09-23: the build-out (bug fixes, phases 1–5, ImHex grid, data types, LSTM,
+measurements and known limits).
 
 Build the prototype:
 
