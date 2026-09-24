@@ -94,7 +94,8 @@ Model::Model(const Config& cfg)
   if (cfg.type == DataType::Audio && cfg.channels <= 0) throw std::runtime_error("audio model needs channels");
   mix_.emplace_back(n_inputs_, 4 * 8, 0.2f);                         // match state x bit position
   mix_.emplace_back(n_inputs_, 257, 0.2f);                           // previous byte
-  mix_.emplace_back(n_inputs_, (grid_.num_views() + 1) * 8, 0.2f);  // winning grid view x bit position
+  // winning grid view x bit position (x new-region flag with the SNN)
+  mix_.emplace_back(n_inputs_, (grid_.num_views() + 1) * 8 * (cfg.snn ? 2 : 1), 0.2f);
 }
 
 std::string Model::input_name(int i) const {
@@ -287,6 +288,8 @@ int Model::predict(const Stream& s, BitPos bp, Votes& v) const {
   v.sel[0] = MatchModel::state(hist_, s, bp) * 8 + bp.index;
   v.sel[1] = s.last_byte + 1;
   v.sel[2] = tracker_.best() * 8 + bp.index;
+  // Change detection: right after a surprise jump, a separate weight set.
+  if (cfg_.snn) v.sel[2] = v.sel[2] * 2 + (snn_region_ > 0 ? 1 : 0);
   float xf[kMixers + 1];
   for (int k = 0; k < kMixers; ++k) {
     v.z[k] = clampf(mix_[(size_t)k].dot(v.x, v.sel[k]), -15.0f, 15.0f);
@@ -319,7 +322,13 @@ void Model::learn(const Stream& s, BitPos bp, const Votes& v, int bit) {
   for (int i = 0; i < n_ctx_; ++i) table_.update(table_.claim(v.ctx[i]), bit, limit_for(i));
   if (cfg_.snn) {
     snn_unit_bits_ += bit_cost(v.mixed, bit);
-    if (bp.index == 7) ++snn_unit_bytes_;
+    if (bp.index == 7 && ++snn_unit_bytes_ >= kSnnMaxUnitBytes) {
+      // No token finished for a while (numbers, symbols, binary): still
+      // watch surprise so change detection isn't blind there.
+      snn_track_change(snn_unit_bits_ / snn_unit_bytes_);
+      snn_unit_bits_ = 0;
+      snn_unit_bytes_ = 0;
+    }
     if (snn_vote_input_ >= 0 && v.snn_raw != 0) {
       // Readout learning: the same error rule as the mixers.
       const float err = target - squash(v.x[snn_vote_input_]);

@@ -36,6 +36,7 @@ struct Report {
   std::vector<int> final_widths;  // auto widths at the end of the file
   std::vector<Segment> segments;
   std::vector<std::pair<std::string, uint64_t>> view_bytes;  // label -> bytes won
+  std::vector<uint64_t> changes;  // SNN: offsets where surprise jumped (new region)
 };
 
 // Builds segments from a per-byte label, ignoring runs shorter than kMinRun.
@@ -87,7 +88,12 @@ double learn_all(Session& s, const std::vector<uint8_t>& data, Report* r) {
   std::vector<std::pair<std::string, uint64_t>> wins;
   if (r) r->solo_bits.assign(n, 0.0);
   double bits = 0;
+  uint64_t seen_changes = m.snn_changes();
   for (size_t i = 0; i < data.size(); ++i) {
+    if (r && m.snn_changes() != seen_changes) {
+      seen_changes = m.snn_changes();
+      r->changes.push_back(i);
+    }
     if (r) {
       std::string label = best_view_label(m, s.stream());
       segs.add(i, label);
@@ -211,6 +217,12 @@ int cmd_compare(int argc, char** argv, int start) {
                   (unsigned long long)segs[i].end, (unsigned long long)(segs[i].end - segs[i].start),
                   segs[i].label.c_str());
     if (segs.size() > show) std::printf("  ... %zu more\n", segs.size() - show);
+    if (cfg[f].snn) {
+      std::printf("  surprise jumps (SNN change detection): %zu", rep[f].changes.size());
+      for (size_t i = 0; i < rep[f].changes.size() && i < 12; ++i) std::printf("%s0x%06llx", i ? ", " : " at ", (unsigned long long)rep[f].changes[i]);
+      if (rep[f].changes.size() > 12) std::printf(", ...");
+      std::printf("\n");
+    }
     std::printf("  totals:");
     for (const auto& v : rep[f].view_bytes)
       std::printf("  %s %.0f%%", v.first.c_str(), 100.0 * v.second / std::max<uint64_t>(1, rep[f].bytes));

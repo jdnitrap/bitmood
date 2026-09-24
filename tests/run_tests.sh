@@ -217,6 +217,12 @@ for spec in "text CONVERSATION.md" "image $T/a.ppm" "audio $T/tone.wav"; do
   check "--type $1 --graph --snn round trip is byte-identical" "cmp -s '$2' '$T/sn.out'"
 done
 
+( cat README.md CONVERSATION.md; head -c 3000 /dev/urandom | base64 -w 76 ) > "$T/shift.txt"
+$BIN compare --graph --snn "$T/shift.txt" README.md > "$T/shift.cmp"
+first=$(grep -o 'surprise jumps (SNN change detection): [0-9]* at 0x[0-9a-f]*' "$T/shift.cmp" | head -1 | grep -o '0x[0-9a-f]*$')
+text_end=$(( $(stat -c%s README.md) + $(stat -c%s CONVERSATION.md) ))
+check "change detection finds text -> base64 within 1 KB (at $first, switch at $text_end)" "[ -n '$first' ] && [ \$(( $first )) -ge $text_end ] && [ \$(( $first )) -lt $(( text_end + 1024 )) ]"
+
 echo "grid views"
 words=(alpha beta gamma delta)
 for i in $(seq 400); do  # 23-byte records; the word and number vary without a longer period

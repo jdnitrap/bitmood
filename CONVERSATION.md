@@ -114,7 +114,7 @@ dropped keys typed while a memory loaded (`TCSAFLUSH`).
 | types | `--type image` (PGM/PPM), `audio` (16-bit WAV), `raw`; specialists I and S; per-type views; `.ppm`/`.wav` output |
 | level 2 | Optional LSTM specialist L (`--lstm N`) |
 
-`make test` runs 75 end-to-end checks (round trips, memory identity,
+`make test` runs 84 end-to-end checks (round trips, memory identity,
 corruption, generation rules, pseudo-terminal `write`, types, LSTM).
 
 ## Measured
@@ -150,6 +150,33 @@ Measured:
   winning), and steering is (1 + strength)^preference (a linear boost
   capped the effect at ~3x).
 - Image: planning flattens colour and adds bands; not recommended.
+
+## SNN on the graph (design: `~/stuff.txt`)
+
+Graph nodes as neurons, edges as synapses (`--graph --snn`). A finished
+token spikes, charge spreads along edges (weight x count share) and leaks
+(x0.6 per token step); the charged neurons are vote N and the source of
+plans. Three-factor learning: eligibility = neurons fired before the unit;
+modulation = the unit's surprise against its running average ("dopamine");
+fired -> predicted synapses move by rate x trace x d; when surprised,
+fired -> actual is strengthened. Readout (text): learned gain and offset.
+Change detection: fast (8 units) vs slow (1024 units) surprise averages;
+a jump (fast > 2 x slow + 1) opens a 128-unit "new region" with its own
+mixer weight set; surprise is also checked every 32 bytes without a
+finished unit.
+
+Measured:
+- N alone 5.81 bits/byte on licenses vs G 6.83 (after learning; 6.62
+  before). README 2.882 -> 2.846 overall; joined 4-file test 62,551 ->
+  62,521 bytes.
+- Planned text: real words 93.2% (G 92.5%), known word pairs 55.4% (G 64.7%).
+- Audio melody at temperature 1: loud slices 61% vs 47% with the plain
+  graph (training 78%); notes still noisy.
+- Images: slightly more colour; compression unchanged.
+- Change detection: file joins found within 54-176 bytes, plus a join
+  inside one file and CSS -> JavaScript; misses changes that don't raise
+  surprise (text -> random digits). Looser thresholds gave 49-116 false
+  alarms on the same test.
 
 ## Known limits
 

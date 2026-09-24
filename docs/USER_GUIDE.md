@@ -40,7 +40,7 @@ make
 make test
 ```
 
-`make test` runs 75 checks and should end with `all tests passed`.
+`make test` runs 84 checks and should end with `all tests passed`.
 It needs `python3` for a few of them.
 
 Run the program with no arguments to see every command:
@@ -491,7 +491,7 @@ run), what should come next from the graph, and lean toward it:
 |---|---|
 | `--graph-plan` | plan with the default strength for the memory's type |
 | `--plan-strength S` | how hard to lean toward the plan (defaults: text 4, audio 100, image 2) |
-| `--plan-temp T` | how adventurous the plans are (default 1 = as often as in the training data) |
+| `--plan-temp T` | how adventurous the plans are (default: text follows `--temp`; audio and image 1 = as often as in the training data) |
 
 What to expect, from measurements:
 
@@ -504,6 +504,55 @@ What to expect, from measurements:
   planning adds horizontal bands. The graph itself (`graph`) is still
   interesting to look at; for generating pictures, leave planning off.
 - **Compression:** the graph changes compressed size by less than 0.1%.
+
+### The spiking network (`--snn`)
+
+`--snn` (together with `--graph`, when creating a memory) turns the graph
+into a small spiking brain:
+
+1. When a word (sound slice, pixel run) finishes, its neuron **spikes**.
+2. The spike **charges** the neurons its edges point to (the likely next ones).
+3. Charge **leaks** each step (`--snn-leak`, default 0.6), so words from a
+   few steps back still count; the plain graph only looks at the last two.
+4. The most-charged neurons are the prediction: vote **N**, and the source
+   of plans with `--graph-plan`.
+
+It learns from the model's own surprise: a word predicted better than usual
+strengthens the connections that predicted it, a word predicted worse
+weakens them, and a surprise also strengthens the path to what really came.
+
+```
+./cmix-bit train --state brain.bin --table-bits 20 --graph --snn mytext.txt
+./cmix-bit generate 300 "The " --state brain.bin --temp 0.7 --novelty 16 --graph-plan
+```
+
+**Finding where data changes.** A sudden rise in surprise marks a "new
+region". `compare` lists these points:
+
+```
+./cmix-bit compare --graph --snn joined.txt other.txt
+```
+
+```
+  surprise jumps (SNN change detection): 7 at 0x0000a3, 0x010f8c, 0x029d13, 0x02a9a0, 0x03ea33, 0x042fee, 0x048970
+```
+
+That was four files joined together (licenses, Python, HTML, markdown):
+`0x010f8c` and `0x042fee` are the joins (within 54 and 176 bytes),
+`0x029d13` is a join between two Python files inside one file, and
+`0x048970` is where the HTML's CSS turns into JavaScript. It reacts to
+*more surprise*, not to every change of kind: text turning into plain
+numbers isn't flagged, text turning into random-looking data is.
+
+What the SNN does, measured against the plain graph:
+
+| | plain graph | graph + SNN |
+|---|---|---|
+| vote alone (licenses) | 6.83 bits/byte | 5.81 |
+| overall compression | | 0.1-1% smaller |
+| planned text: real words | 92.5% | 93.2% |
+| planned text: known word pairs | 64.7% | 55.4% |
+| generated audio: loud slices (temp 1, training 78%) | 47% | 61% |
 
 ## 9. Compressing files
 
@@ -544,6 +593,7 @@ small and medium files.
 | `write needs an interactive terminal` | Run `write` in a terminal, not with piped input. |
 | `... has no graph (train a new memory with --graph)` | `--graph-plan` and `graph` need a memory created with `--graph`. |
 | `... already exists without a graph` | `--graph` can't be added to an existing memory; train a new one. |
+| `--snn needs --graph` / `... already exists without an SNN` | `--snn` only works together with `--graph`, on a new memory. |
 | `the constraints leave no byte that may come next` | Your rules contradict each other (e.g. a word list with no word starting with the acrostic letter). Loosen one. |
 
 **Speed.** Training runs at about 150 KB per second (about 20 KB per second
@@ -565,10 +615,11 @@ sentence. More training text, of one consistent style, helps most.
 ### `train`
 ```
 cmix-bit train --state MEMORY [--type text|image|audio|raw] [--table-bits 16..28]
-               [--lstm N] [--graph [--graph-confirm N]] [--width W --channels 1|3] FILE...
+               [--lstm N] [--graph [--graph-confirm N] [--snn [--snn-leak L]]]
+               [--width W --channels 1|3] FILE...
 ```
 Creates the memory if it doesn't exist, otherwise keeps learning.
-`--type`, `--table-bits`, `--lstm`, `--graph` and the shape only apply when creating.
+`--type`, `--table-bits`, `--lstm`, `--graph`, `--snn` and the shape only apply when creating.
 
 ### `generate`
 ```
@@ -592,7 +643,7 @@ cmix-bit generate --state AUDIO_MEMORY --seconds S --out new.wav [options]
 | `--rhyme` | off | rough AABB rhyme |
 | `--best-of N` | 1 | candidates per line |
 | `--graph-plan` | off | plan from the graph (memory made with `--graph`) |
-| `--plan-strength S`, `--plan-temp T` | per type, 1 | how hard / how adventurously to plan |
+| `--plan-strength S`, `--plan-temp T` | per type | how hard / how adventurously to plan (text: `--temp`; audio, image: 1) |
 | `--out FILE` | screen | write to a file |
 | `--stats` | off | print statistics |
 
@@ -615,12 +666,12 @@ cmix-bit graph MEMORY [WORD] [--top N]
 
 ### `compare`
 ```
-cmix-bit compare [--type text|image|audio|raw] [--width W --channels C] [--lstm N] [--graph] FILE_A FILE_B
+cmix-bit compare [--type text|image|audio|raw] [--width W --channels C] [--lstm N] [--graph [--snn]] FILE_A FILE_B
 ```
 
 ### `compress` / `decompress`
 ```
-cmix-bit compress [--type text|image|audio|raw] [--width W --channels C] [--lstm N] [--graph] IN OUT.cmxb
+cmix-bit compress [--type text|image|audio|raw] [--width W --channels C] [--lstm N] [--graph [--snn]] IN OUT.cmxb
 cmix-bit decompress IN.cmxb OUT
 ```
 

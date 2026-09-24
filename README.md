@@ -141,6 +141,7 @@ records and 64-bit pointer regions on its own.
 | B1, B2 | long match: the most recent earlier place the last 5+ bytes occurred, found with a hash index over up to 16 MB of history |
 | L (optional) | level 2: a small byte-level LSTM (`--lstm N`, 1–64 cells) |
 | G (optional) | graph: words (text), 20 ms sound shapes (audio), 8-pixel run shapes (image), with "what comes next" edges (`--graph`) |
+| N (optional) | spiking network on that graph (`--snn`): nodes are neurons, edges are synapses |
 
 Context statistics live in one shared table (`--table-bits`, default 22 =
 32 MB) of adaptive probabilities with 16-bit collision checks in buckets of
@@ -175,6 +176,36 @@ also occur in the training text rise from 52% to 65-72%; in audio it
 breaks long silences into a note/pause rhythm (still noisy); in images
 planning only flattens the picture, so leave it off there. It changes
 compressed size by less than 0.1%.
+
+### Spiking network on the graph (SNN)
+
+```
+./cmix-bit train --state brain.bin --graph --snn corpus.txt
+./cmix-bit compare --graph --snn joined_files.txt other.txt   # also lists surprise jumps
+```
+
+With `--snn` the graph becomes a small spiking brain (design: the user's
+`stuff.txt`). Each finished token (word, sound slice, pixel run) makes its
+neuron spike; the spike charges the neurons its edges point to; charge
+leaks each step (`--snn-leak`, default 0.6), so tokens several steps back
+still count. The charged neurons are vote **N** and, with `--graph-plan`,
+the source of plans. Learning needs no backpropagation: the model's
+surprise per unit, compared with its running average, acts like dopamine
+in a three-factor rule on the synapse weights (connections that made a
+good prediction are strengthened, bad ones weakened, and when surprised
+the path to what really came is strengthened). A sudden rise in surprise
+opens a "new region" that switches a mixer weight set; `compare` lists
+these change points.
+
+Measured: N alone predicts clearly better than the plain graph vote
+(5.81 vs 6.83 bits/byte on licenses); overall compression changes by
+0.1-1%; planned text has slightly more real words (93% vs 92.5%) but fewer
+known word pairs (55% vs 65%); generated audio gets louder and closer to
+the training rhythm (61% vs 47% loud slices at temperature 1, training
+78%), still noisy; images keep a little more colour. Change detection found
+file boundaries in joined files within 50-200 bytes, and even a boundary
+hidden inside one file, but it only reacts to rises in surprise, not to
+every change of kind.
 
 ### Level 2: LSTM specialist
 

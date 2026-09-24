@@ -152,12 +152,16 @@ void Model::snn_learn(const SnnState& n, Token actual) {
 
 void Model::snn_track_change(double u) {
   if (snn_slow_ <= 0) snn_fast_ = snn_slow_ = u;
-  snn_fast_ += (u - snn_fast_) / 4.0;
-  snn_slow_ += (u - snn_slow_) / 64.0;
+  // Tuned on four joined files: finds file boundaries (within ~50-200
+  // bytes) and real content changes (CSS -> JavaScript) without firing on
+  // ordinary hard words.
+  snn_fast_ += (u - snn_fast_) / 8.0;
+  snn_slow_ += (u - snn_slow_) / 1024.0;
   if (snn_region_ > 0) --snn_region_;
-  // A sudden rise in surprise: something new started.
-  if (snn_region_ == 0 && snn_fast_ > snn_slow_ * 1.4 + 0.3) {
-    snn_region_ = 8;
+  // A sudden rise in surprise: something new started. The region lasts
+  // 128 units, and no new jump is reported during it.
+  if (snn_region_ == 0 && snn_fast_ > snn_slow_ * 2.0 + 1.0) {
+    snn_region_ = 128;
     ++snn_changes_;
   }
 }

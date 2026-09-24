@@ -146,6 +146,7 @@ class Model {
   void snn_learn(const SnnState& n, Token actual);  // three-factor learning at a finished unit
   void snn_track_change(double unit_surprise);      // change detection (step 3b)
   static constexpr double kSnnRate = 0.1;
+  static constexpr uint64_t kSnnMaxUnitBytes = 32;  // surprise is checked at least this often
   // SNN learning state (saved): surprise of the unit in progress, its
   // running baseline, and the text readout's gain and offset.
   double snn_unit_bits_ = 0;
