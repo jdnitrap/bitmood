@@ -161,6 +161,7 @@ void Model::graph_advance(Stream& s, uint8_t b) const {
 void Model::learned_byte(const Stream& s) {
   if (!graph_ || !s.graph.completed) return;
   const GraphState& g = s.graph;
+  if (cfg_.snn) snn_learn(s.snn, g.learn_next);  // before the edge counts change
   graph_->add(g.learn_t1, g.learn_t0, g.learn_next);
   // Image SNN: the run above also connects through its role neuron.
   if (cfg_.snn && cfg_.type == DataType::Image && g.learn_t1 != kNoToken)

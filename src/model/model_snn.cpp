@@ -29,6 +29,11 @@ constexpr float kMinCharge = 0.01f;
 
 void Model::snn_step(Stream& s, const Token* fire, const float* strength, int k) const {
   SnnState& n = s.snn;
+  // Snapshot for three-factor learning (what led up to the token just finished).
+  n.last_predicted = n.predicted;
+  n.last_nf = n.nf;
+  std::copy(n.fired, n.fired + n.nf, n.last_fired);
+  std::copy(n.trace, n.trace + n.nf, n.last_trace);
   // Leak, and forget neurons whose charge has faded.
   int kept = 0;
   for (int i = 0; i < n.n; ++i) {
@@ -115,6 +120,46 @@ void Model::snn_text_tree(const GraphState& g, SnnState& n) const {
   for (int k = 0; k < 256; ++k) n.tree[256 + k] = 0.98f * (float)(w[k] / total) + 0.02f / 256.0f;
   for (int m = 255; m >= 1; --m) n.tree[m] = n.tree[2 * m] + n.tree[2 * m + 1];
   n.tree_ready = true;
+}
+
+void Model::snn_learn(const SnnState& n, Token actual) {
+  // Surprise of the unit that just finished, against a running baseline.
+  if (snn_unit_bytes_ == 0) return;
+  const double u = snn_unit_bits_ / snn_unit_bytes_;
+  snn_unit_bits_ = 0;
+  snn_unit_bytes_ = 0;
+  if (snn_baseline_ <= 0) snn_baseline_ = u;
+  // "Dopamine": better than usual > 0, worse < 0.
+  const double d = std::max(-1.0, std::min(1.0, (snn_baseline_ - u) / std::max(snn_baseline_, 0.5)));
+  snn_baseline_ += (u - snn_baseline_) / 64.0;
+  snn_track_change(u);
+  if (actual == kNoToken) return;
+  auto nudge = [&](Token from, Token to, double delta) {
+    if (to == kNoToken) return;
+    if (TokenGraph::Edge* e = graph_->edge(from, to))
+      e->w = (float)std::max(0.05, std::min(4.0, e->w + delta));
+  };
+  for (int i = 0; i < n.last_nf; ++i) {
+    const Token pre = n.last_fired[i];
+    const double eligible = n.last_trace[i];
+    // The connections that made the prediction: reinforced when it went
+    // well, weakened when it went badly.
+    nudge(pre, n.last_predicted, kSnnRate * eligible * d);
+    // When surprised, the path to what really came is strengthened.
+    if (n.last_predicted != actual && d < 0) nudge(pre, actual, kSnnRate * eligible * -d);
+  }
+}
+
+void Model::snn_track_change(double u) {
+  if (snn_slow_ <= 0) snn_fast_ = snn_slow_ = u;
+  snn_fast_ += (u - snn_fast_) / 4.0;
+  snn_slow_ += (u - snn_slow_) / 64.0;
+  if (snn_region_ > 0) --snn_region_;
+  // A sudden rise in surprise: something new started.
+  if (snn_region_ == 0 && snn_fast_ > snn_slow_ * 1.4 + 0.3) {
+    snn_region_ = 8;
+    ++snn_changes_;
+  }
 }
 
 bool Model::snn_role_token(Token t) const {

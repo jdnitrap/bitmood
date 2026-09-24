@@ -62,6 +62,12 @@ struct SnnState {
   uint32_t fired[kMaxFired] = {};
   float trace[kMaxFired] = {};        // eligibility: 1 when fired, decays each step
   uint32_t predicted = kNone;         // most-charged neuron after the last spike
+  // Snapshot taken just before the latest spike, for learning: what was
+  // predicted for the token that just finished, and which neurons fired.
+  uint32_t last_predicted = kNone;
+  int last_nf = 0;
+  uint32_t last_fired[kMaxFired] = {};
+  float last_trace[kMaxFired] = {};
   // Text: next-byte distribution from the charged words, as a prefix-sum tree.
   float tree[512] = {};
   bool tree_ready = false;

@@ -273,6 +273,14 @@ int Model::predict(const Stream& s, BitPos bp, Votes& v) const {
   };
   tree_vote(graph_vote_input_, s.graph.tree, s.graph.tree_ready);
   tree_vote(snn_vote_input_, s.snn.tree, s.snn.tree_ready);
+  if (snn_vote_input_ >= 0 && s.snn.tree_ready) {
+    // Readout: a learned gain and offset turn the charges' vote into N.
+    v.snn_raw = v.x[snn_vote_input_];
+    v.x[snn_vote_input_] = snn_gain_ * v.snn_raw + snn_offset_;
+    v.p[snn_vote_input_] = to_p16(squash(v.x[snn_vote_input_]));
+  } else {
+    v.snn_raw = 0;
+  }
   v.x[bias_] = 0.5f;
   v.p[bias_] = 32768;
 
@@ -298,7 +306,6 @@ int Model::predict(const Stream& s, BitPos bp, Votes& v) const {
 
 void Model::learn(const Stream& s, BitPos bp, const Votes& v, int bit) {
   (void)s;
-  (void)bp;
   const float target = (float)bit;
   const float lr = mixer_lr(bytes_learned);
   float xf[kMixers + 1];
@@ -310,6 +317,16 @@ void Model::learn(const Stream& s, BitPos bp, const Votes& v, int bit) {
   final_.learn(xf, v.final_set, target - squash(v.zf), 0.002f);
 
   for (int i = 0; i < n_ctx_; ++i) table_.update(table_.claim(v.ctx[i]), bit, limit_for(i));
+  if (cfg_.snn) {
+    snn_unit_bits_ += bit_cost(v.mixed, bit);
+    if (bp.index == 7) ++snn_unit_bytes_;
+    if (snn_vote_input_ >= 0 && v.snn_raw != 0) {
+      // Readout learning: the same error rule as the mixers.
+      const float err = target - squash(v.x[snn_vote_input_]);
+      snn_gain_ = clampf(snn_gain_ + 0.002f * err * v.snn_raw, 0.0f, 4.0f);
+      snn_offset_ = clampf(snn_offset_ + 0.002f * err, -2.0f, 2.0f);
+    }
+  }
   match_.learn(v.match_slot, bit);
   apm1_.update(v.apm_slot[0], bit);
   apm2_.update(v.apm_slot[1], bit);
@@ -378,6 +395,18 @@ void Model::save(Writer& w) const {
     w.tag("LSTM");
     lstm_->save(w);
   }
+  if (cfg_.snn) {
+    w.tag("SNNL");
+    w.f64(snn_unit_bits_);
+    w.u64(snn_unit_bytes_);
+    w.f64(snn_baseline_);
+    w.f32(snn_gain_);
+    w.f32(snn_offset_);
+    w.f64(snn_fast_);
+    w.f64(snn_slow_);
+    w.i32(snn_region_);
+    w.u64(snn_changes_);
+  }
   if (graph_) {
     w.tag("GRPH");
     graph_->save(w);
@@ -412,6 +441,18 @@ void Model::load(Reader& r) {
   if (lstm_) {
     r.expect_tag("LSTM");
     lstm_->load(r);
+  }
+  if (cfg_.snn) {
+    r.expect_tag("SNNL");
+    snn_unit_bits_ = r.f64();
+    snn_unit_bytes_ = r.u64();
+    snn_baseline_ = r.f64();
+    snn_gain_ = r.f32();
+    snn_offset_ = r.f32();
+    snn_fast_ = r.f64();
+    snn_slow_ = r.f64();
+    snn_region_ = r.i32();
+    snn_changes_ = r.u64();
   }
   if (graph_) {
     r.expect_tag("GRPH");

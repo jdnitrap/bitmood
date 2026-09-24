@@ -79,6 +79,7 @@ class Model {
     float zf = 0;                  // final mixer output
     uint32_t apm_slot[2] = {};
     int mixed = 32768;             // final P(bit = 1), 16-bit
+    float snn_raw = 0;             // text N vote before the readout (for learning it)
   };
 
   explicit Model(const Config& cfg);
@@ -142,6 +143,27 @@ class Model {
   // SNN (model_snn.cpp): one token step (leak, then the given neurons spike).
   void snn_step(Stream& s, const Token* fire, const float* strength, int k) const;
   void snn_text_tree(const GraphState& g, SnnState& n) const;
+  void snn_learn(const SnnState& n, Token actual);  // three-factor learning at a finished unit
+  void snn_track_change(double unit_surprise);      // change detection (step 3b)
+  static constexpr double kSnnRate = 0.1;
+  // SNN learning state (saved): surprise of the unit in progress, its
+  // running baseline, and the text readout's gain and offset.
+  double snn_unit_bits_ = 0;
+  uint64_t snn_unit_bytes_ = 0;
+  double snn_baseline_ = 0;
+  float snn_gain_ = 1.0f, snn_offset_ = 0.0f;
+  // Change detection: fast and slow averages of unit surprise; a jump opens
+  // a "new region" for a few units. snn_changes_ counts detected jumps.
+  double snn_fast_ = 0, snn_slow_ = 0;
+  int snn_region_ = 0;
+  uint64_t snn_changes_ = 0;
+
+ public:
+  // Units left in the current "new region" (0 = none) and jumps seen so far.
+  int snn_region() const { return snn_region_; }
+  uint64_t snn_changes() const { return snn_changes_; }
+
+ private:
   bool snn_role_token(Token t) const;
   // Image: the run above acts through its own "above" neuron.
   static constexpr Token kAboveRole = 0x40000000u;

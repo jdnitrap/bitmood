@@ -96,6 +96,12 @@ void save_stream(Writer& w, const Stream& s) {
   w.u32(n.predicted);
   for (float t : n.tree) w.f32(t);
   w.u8(n.tree_ready);
+  w.u32(n.last_predicted);
+  w.i32(n.last_nf);
+  for (int i = 0; i < SnnState::kMaxFired; ++i) {
+    w.u32(n.last_fired[i]);
+    w.f32(n.last_trace[i]);
+  }
   w.u64(s.line_start);
   w.u64(s.prev_line_start);
   s.widths.save(w);
@@ -154,6 +160,13 @@ Stream load_stream(Reader& r) {
   n.predicted = r.u32();
   for (float& t : n.tree) t = r.f32();
   n.tree_ready = r.u8() != 0;
+  n.last_predicted = r.u32();
+  n.last_nf = r.i32();
+  if (n.last_nf < 0 || n.last_nf > SnnState::kMaxFired) throw std::runtime_error("state file: bad SNN state");
+  for (int i = 0; i < SnnState::kMaxFired; ++i) {
+    n.last_fired[i] = r.u32();
+    n.last_trace[i] = r.f32();
+  }
   s.line_start = r.u64();
   s.prev_line_start = r.u64();
   s.widths.load(r);
