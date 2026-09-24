@@ -140,6 +140,7 @@ records and 64-bit pointer regions on its own.
 | E | grid views (above) |
 | B1, B2 | long match: the most recent earlier place the last 5+ bytes occurred, found with a hash index over up to 16 MB of history |
 | L (optional) | level 2: a small byte-level LSTM (`--lstm N`, 1–64 cells) |
+| G (optional) | graph: words (text), 20 ms sound shapes (audio), 8-pixel run shapes (image), with "what comes next" edges (`--graph`) |
 
 Context statistics live in one shared table (`--table-bits`, default 22 =
 32 MB) of adaptive probabilities with 16-bit collision checks in buckets of
@@ -153,6 +154,27 @@ HTML and markdown this is about 20% smaller than `xz -9e`.
 A memory file holds the table, the history, the mixers and the APMs: about
 36 MB by default, about 6 MB with `--table-bits 18` (fine for a few hundred
 KB of training text).
+
+### Graph specialist
+
+```
+./cmix-bit train --state brain.bin --graph corpus.txt
+./cmix-bit graph brain.bin              # most frequent words, strongest links
+./cmix-bit graph brain.bin memory       # what follows / precedes "memory"
+./cmix-bit generate 300 "The " --state brain.bin --graph-plan
+```
+
+Specialist **G** keeps a graph whose nodes are words (text), shapes of
+20 ms sound slices (audio: loudness, pitch, trend) or shapes of 8-pixel runs
+(image: brightness, slope, texture, colour), with edges for "this came
+next" (images: given the run above and to the left). An edge only votes
+once seen twice (`--graph-confirm N`). With `--graph-plan` the generator
+picks the next word / slice / run from the graph and leans toward it
+(`--plan-strength`, `--plan-temp`). Measured: in text, word pairs that
+also occur in the training text rise from 52% to 65-72%; in audio it
+breaks long silences into a note/pause rhythm (still noisy); in images
+planning only flattens the picture, so leave it off there. It changes
+compressed size by less than 0.1%.
 
 ### Level 2: LSTM specialist
 

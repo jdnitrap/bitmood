@@ -20,7 +20,7 @@ void usage() {
                "                      [--temp T] [--top-p P] [--top-k K] [--seed N]\n"
                "                      [--charset seen|utf8|ascii|any] [--novelty N]\n"
                "                      [--line-start CHARS | --acrostic WORD] [--max-line N]\n"
-               "                      [--words FILE] [--rhyme] [--best-of N] [--graph-plan] [--stats]\n"
+               "                      [--words FILE] [--rhyme] [--best-of N] [--graph-plan [--plan-strength S] [--plan-temp T]] [--stats]\n"
                "  cmix-bit info       <memory.bin>\n"
                "  cmix-bit graph      <memory.bin> [word]\n"
                "  cmix-bit compare    [--type text|image|audio|raw] <fileA> <fileB>\n"

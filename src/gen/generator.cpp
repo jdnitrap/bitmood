@@ -119,6 +119,18 @@ ByteMask Generator::allowed() const {
   return mask;
 }
 
+double default_plan_strength(DataType t) {
+  // Measured: text flows better at 4; audio needs ~100 to leave a pause;
+  // images only flatten with strong steering.
+  switch (t) {
+    case DataType::Text: return 4.0;
+    case DataType::Audio: return 100.0;
+    case DataType::Image: return 2.0;
+    case DataType::Raw: return 0.0;
+  }
+  return 0.0;
+}
+
 void Generator::plan_units() {
   for (Source& s : src_) {
     Model& m = *s.model;
@@ -127,7 +139,7 @@ void Generator::plan_units() {
     double total = 0;
     std::vector<double> w;
     for (const auto& c : cands) {
-      w.push_back(std::pow(c.weight, 1.0 / opt_.temp));
+      w.push_back(std::pow(c.weight, 1.0 / opt_.plan_temp));
       total += w.back();
     }
     Token pick = kNoToken;
@@ -152,11 +164,14 @@ uint8_t Generator::next() {
   distribution(model_p);
   // Steer toward planned words: boost the byte that continues each source's plan.
   ByteProbs steer = model_p;
-  if (opt_.plan && opt_.plan_strength > 0)
+  if (opt_.plan && opt_.plan_strength != 0) {
+    double w[256];
     for (const Source& s : src_) {
-      const int c = s.model->plan_next_byte(s.stream);
-      if (c >= 0) steer[c] *= 1.0 + opt_.plan_strength;
+      std::fill(w, w + 256, 1.0);
+      s.model->plan_bias(s.stream, opt_.plan_strength >= 0 ? opt_.plan_strength : default_plan_strength(s.model->config().type), w);
+      for (int c = 0; c < 256; ++c) steer[c] *= w[c];
     }
+  }
   const ByteMask ok = allowed();
 
   // Candidates: allowed bytes with their temperature-adjusted weight.

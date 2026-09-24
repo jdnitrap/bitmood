@@ -178,6 +178,28 @@ $BIN compress --graph CONVERSATION.md "$T/gc.cmxb" 2>/dev/null && $BIN decompres
 check "--graph round trip is byte-identical" "cmp -s CONVERSATION.md '$T/gc.out'"
 check "--graph on a raw memory is rejected" "! $BIN train --state '$T/gr.st' --type raw --graph README.md 2>/dev/null"
 
+echo "graph specialist: audio and image"
+$BIN train --state "$T/ga1.st" --type audio --graph --table-bits 18 "$T/tone.wav" "$T/tone.wav" 2>/dev/null
+$BIN train --state "$T/ga2.st" --type audio --graph --table-bits 18 "$T/tone.wav" 2>/dev/null
+$BIN train --state "$T/ga2.st" "$T/tone.wav" 2>/dev/null
+check "audio graph memory: one run == two runs" "cmp -s '$T/ga1.st' '$T/ga2.st'"
+check "graph shows sound shapes" "$BIN graph '$T/ga1.st' | grep -q 'sound-shape graph' && $BIN graph '$T/ga1.st' | grep -q 'Hz'"
+$BIN generate --state "$T/ga1.st" --seconds 0.25 --out "$T/ga.wav" --graph-plan --seed 1
+check "audio --graph-plan writes a 0.25 s WAV" "[ \$(stat -c%s '$T/ga.wav') -eq \$((44 + 2000 * 2)) ]"
+$BIN train --state "$T/gi1.st" --type image --graph --table-bits 18 "$T/a.ppm" "$T/b.ppm" 2>/dev/null
+$BIN train --state "$T/gi2.st" --type image --graph --table-bits 18 "$T/a.ppm" 2>/dev/null
+$BIN train --state "$T/gi2.st" "$T/b.ppm" 2>/dev/null
+check "image graph memory: one run == two runs" "cmp -s '$T/gi1.st' '$T/gi2.st'"
+check "graph shows pixel-run shapes" "$BIN graph '$T/gi1.st' | grep -q 'pixel-run graph' && $BIN graph '$T/gi1.st' | grep -q 'brightness'"
+check "looking up a word in an image graph is rejected" "! $BIN graph '$T/gi1.st' the 2>/dev/null"
+$BIN generate --state "$T/gi1.st" --height 8 --out "$T/gi.ppm" --graph-plan --seed 1
+check "image --graph-plan writes a 64x8 PPM" "[ \$(stat -c%s '$T/gi.ppm') -eq \$((12 + 64 * 8 * 3)) ]"
+for spec in "image a.ppm" "audio tone.wav"; do
+  set -- $spec
+  $BIN compress --type $1 --graph "$T/$2" "$T/gt.cmxb" 2>/dev/null && $BIN decompress "$T/gt.cmxb" "$T/gt.out" 2>/dev/null
+  check "--type $1 --graph round trip is byte-identical" "cmp -s '$T/$2' '$T/gt.out'"
+done
+
 echo "grid views"
 words=(alpha beta gamma delta)
 for i in $(seq 400); do  # 23-byte records; the word and number vary without a longer period

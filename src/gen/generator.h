@@ -39,11 +39,16 @@ struct GenOptions {
   double top_p = 1.0;  // keep the smallest set of bytes whose probability sums to top_p
   int top_k = 0;       // keep only the k most likely bytes (0 = off)
   bool plan = false;   // graph planning: pick the next word / slice / run to aim for
-  double plan_strength = 4.0;  // text: the byte continuing the planned word gets (1 + this) x weight
+  // How hard generation leans toward the plan (see Model::plan_bias).
+  // Negative = the default for each memory's type (text 4, audio 100, image 2).
+  double plan_strength = -1.0;
+  double plan_temp = 1.0;      // temperature for choosing plans (1 = as often as in training)
   uint64_t seed = 0xC0FFEE;
 };
 
 using ByteProbs = std::array<double, 256>;
+
+double default_plan_strength(DataType t);
 
 class Generator {
  public:

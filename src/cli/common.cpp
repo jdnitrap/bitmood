@@ -124,8 +124,11 @@ GenOptions gen_options(const Args& a) {
   o.top_k = (int)a.integer("top-k", 0);
   o.seed = (uint64_t)a.integer("seed", 0xC0FFEE);
   o.plan = a.has("graph-plan") || a.has("plan-strength");
-  o.plan_strength = a.num("plan-strength", 4.0);
-  if (o.plan_strength < 0) throw std::runtime_error("--plan-strength must be >= 0");
+  o.plan_strength = a.num("plan-strength", -1.0);
+  o.plan_temp = a.num("plan-temp", 1.0);
+  if (!(o.plan_temp > 0)) throw std::runtime_error("--plan-temp must be > 0");
+  o.plan = o.plan || a.has("plan-temp");
+  if (a.has("plan-strength") && o.plan_strength < 0) throw std::runtime_error("--plan-strength must be >= 0");
   if (!(o.temp > 0)) throw std::runtime_error("--temp must be > 0");
   if (!(o.top_p > 0 && o.top_p <= 1)) throw std::runtime_error("--top-p must be in (0, 1]");
   if (o.top_k < 0) throw std::runtime_error("--top-k must be >= 0");
@@ -162,7 +165,7 @@ void add_shape_constraints(Generator& g, const Args& a) {
 const std::set<std::string> kGenValued = {"state",   "blend",      "blend-mode", "temp",     "top-p",    "top-k",
                                           "seed",    "charset",    "novelty",  "line-start", "acrostic",
                                           "max-line", "words",     "best-of",  "out",      "height",
-                                          "seconds",  "plan-strength"};
+                                          "seconds",  "plan-strength", "plan-temp"};
 const std::set<std::string> kGenFlags = {"stats", "rhyme", "graph-plan"};
 
 }  // namespace cmix

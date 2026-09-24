@@ -114,7 +114,7 @@ dropped keys typed while a memory loaded (`TCSAFLUSH`).
 | types | `--type image` (PGM/PPM), `audio` (16-bit WAV), `raw`; specialists I and S; per-type views; `.ppm`/`.wav` output |
 | level 2 | Optional LSTM specialist L (`--lstm N`) |
 
-`make test` runs 55 end-to-end checks (round trips, memory identity,
+`make test` runs 75 end-to-end checks (round trips, memory identity,
 corruption, generation rules, pseudo-terminal `write`, types, LSTM).
 
 ## Measured
@@ -128,6 +128,28 @@ corruption, generation rules, pseudo-terminal `write`, types, LSTM).
 - `compare --type raw` on the cmix-bit binary finds the 24-byte ELF symbol
   records and 64-bit pointer regions without being told the format.
 - LSTM: 0.3–1.3% smaller at ~7–8× the time, so opt-in.
+
+## Graph specialist (added after the build-out)
+
+The 09-22 graph idea, built for three data types (`--graph`, opt-in):
+nodes are words (text), 20 ms slice shapes (audio) or 8-pixel run shapes
+(image); order-1 and order-2 edges; an edge votes only after
+`--graph-confirm` sightings (default 2). `cmix-bit graph` shows it.
+`generate --graph-plan` picks the next unit from the graph and steers
+toward it (`--plan-strength`, defaults text 4 / audio 100 / image 2;
+`--plan-temp`, default 1).
+
+Measured:
+- Text: known word pairs 51.5% -> 64.7% (strength 4) / 71.8% (20); real
+  words 91% -> 92-94%. Compression gain < 0.1% (orders 5-8 already
+  cover word transitions).
+- Audio (repeating melody): without planning, generation falls silent
+  (0-6% loud slices vs 78% in training). Planning doubles to triples the
+  loud share, but the notes stay noisy. Two fixes were needed on the way:
+  plans get their own temperature (squaring weights kept "stay quiet"
+  winning), and steering is (1 + strength)^preference (a linear boost
+  capped the effect at ~3x).
+- Image: planning flattens colour and adds bands; not recommended.
 
 ## Known limits
 

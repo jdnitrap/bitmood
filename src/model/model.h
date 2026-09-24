@@ -22,6 +22,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -104,8 +105,11 @@ class Model {
   bool graph_can_plan(const Stream& s) const;
   std::vector<TokenGraph::Candidate> graph_candidates(const Stream& s) const;
   void replan(Stream& s, Token t) const;  // kNoToken: nothing to plan
-  // Text: the byte that continues the planned word (' ' once it is complete), or -1.
-  int plan_next_byte(const Stream& s) const;
+  // Steering toward the plan for the next byte: multiplies weight[c] for
+  // bytes that move toward it. Text: the byte continuing the planned word.
+  // Audio: louder or quieter high bytes, toward the planned slice's loudness.
+  // Image: values near the planned run's brightness and colour.
+  void plan_bias(const Stream& s, double strength, double* weight) const;
   const TokenGraph* graph() const { return graph_.get(); }
   const Vocab& vocab() const { return vocab_; }
   // Audio slice length in samples.

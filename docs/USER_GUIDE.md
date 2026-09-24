@@ -22,9 +22,10 @@ commands on this repository's own `README.md` and `CONVERSATION.md`.
 5. [Writing together with the model](#5-writing-together-with-the-model)
 6. [Pictures and sounds](#6-pictures-and-sounds)
 7. [Looking at files the ImHex way](#7-looking-at-files-the-imhex-way)
-8. [Compressing files](#8-compressing-files)
-9. [Troubleshooting](#9-troubleshooting)
-10. [Command reference](#10-command-reference)
+8. [The graph: words, sound shapes, pixel runs](#8-the-graph-words-sound-shapes-pixel-runs)
+9. [Compressing files](#9-compressing-files)
+10. [Troubleshooting](#10-troubleshooting)
+11. [Command reference](#11-command-reference)
 
 ---
 
@@ -39,7 +40,7 @@ make
 make test
 ```
 
-`make test` runs 55 checks and should end with `all tests passed`.
+`make test` runs 75 checks and should end with `all tests passed`.
 It needs `python3` for a few of them.
 
 Run the program with no arguments to see every command:
@@ -406,7 +407,105 @@ For binary files use `--type raw`. On a compiled program it finds the
 
 ---
 
-## 8. Compressing files
+## 8. The graph: words, sound shapes, pixel runs
+
+The graph is an optional part of a memory that remembers *what usually
+comes next* in bigger units than bytes:
+
+| Type | A node is | An edge means |
+|---|---|---|
+| text | a word | this word was followed by that word |
+| audio | the shape of a 20 ms slice (loudness, pitch, rising/steady/fading) | this sound shape was followed by that one |
+| image | the shape of 8 pixels in a row (brightness, slope, texture, colour) | with this run above and that run to the left, this run came |
+
+An edge only counts once it has been seen twice ("needs a yes before it
+is a fact"); `--graph-confirm N` changes that number.
+
+### Make a memory with a graph
+
+`--graph` only works when a memory is created:
+
+```
+./cmix-bit train --state brain.bin --table-bits 20 --graph README.md CONVERSATION.md docs/USER_GUIDE.md
+./cmix-bit info brain.bin
+```
+
+```
+graph          5773 nodes, 10113 edges (1248 confirmed, needs 2 sightings), 1205 words
+```
+
+### Look inside
+
+```
+./cmix-bit graph brain.bin
+```
+
+```
+word graph: 5773 nodes, 10113 edges, 1248 confirmed (an edge needs 2 sightings)
+
+most frequent words (1205 different):
+     306  the
+     158  a
+     111  bit
+...
+strongest links:
+      54  cmix -> bit
+      29  the -> model
+      21  brain -> bin
+...
+```
+
+One word's neighbours:
+
+```
+./cmix-bit graph brain.bin memory
+```
+
+```
+'memory' seen 53 times
+
+after 'memory':
+       5  file
+       4  is
+       2  type
+...
+before 'memory':
+      16  the
+       3  text
+       3  state
+```
+
+For audio and image memories, `graph` describes the shapes instead, e.g.
+`[loud 6/7, ~565 Hz, steady] -> [loud 5/7, ~565 Hz, fading]`.
+
+### Plan while generating
+
+`--graph-plan` makes the generator pick, at the start of each word (slice,
+run), what should come next from the graph, and lean toward it:
+
+```
+./cmix-bit generate 300 "The " --state brain.bin --temp 0.7 --novelty 16 --graph-plan
+```
+
+| Option | Effect |
+|---|---|
+| `--graph-plan` | plan with the default strength for the memory's type |
+| `--plan-strength S` | how hard to lean toward the plan (defaults: text 4, audio 100, image 2) |
+| `--plan-temp T` | how adventurous the plans are (default 1 = as often as in the training data) |
+
+What to expect, from measurements:
+
+- **Text:** word-to-word flow improves. Over 8 samples, the share of word
+  pairs that also occur in the training text went from 52% to 65% (strength
+  4) and 72% (strength 20). It still doesn't give meaning.
+- **Audio:** it gets generated sound out of long silences and into a
+  note / pause rhythm (2-3 times more loud slices), but the notes are noisy.
+- **Images:** planning makes pictures flatter and greyer, and strong
+  planning adds horizontal bands. The graph itself (`graph`) is still
+  interesting to look at; for generating pictures, leave planning off.
+- **Compression:** the graph changes compressed size by less than 0.1%.
+
+## 9. Compressing files
 
 ```
 ./cmix-bit compress README.md readme.cmxb
@@ -431,7 +530,7 @@ small and medium files.
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Message | Meaning / fix |
 |---|---|
@@ -443,6 +542,8 @@ small and medium files.
 | `--blend needs one weight per --state` | Give exactly one weight for each `--state`. |
 | `image output needs --out FILE` | Pictures and sounds are written to a file, not the screen. |
 | `write needs an interactive terminal` | Run `write` in a terminal, not with piped input. |
+| `... has no graph (train a new memory with --graph)` | `--graph-plan` and `graph` need a memory created with `--graph`. |
+| `... already exists without a graph` | `--graph` can't be added to an existing memory; train a new one. |
 | `the constraints leave no byte that may come next` | Your rules contradict each other (e.g. a word list with no word starting with the acrostic letter). Loosen one. |
 
 **Speed.** Training runs at about 150 KB per second (about 20 KB per second
@@ -459,15 +560,15 @@ sentence. More training text, of one consistent style, helps most.
 
 ---
 
-## 10. Command reference
+## 11. Command reference
 
 ### `train`
 ```
 cmix-bit train --state MEMORY [--type text|image|audio|raw] [--table-bits 16..28]
-               [--lstm N] [--width W --channels 1|3] FILE...
+               [--lstm N] [--graph [--graph-confirm N]] [--width W --channels 1|3] FILE...
 ```
 Creates the memory if it doesn't exist, otherwise keeps learning.
-`--type`, `--table-bits`, `--lstm` and the shape only apply when creating.
+`--type`, `--table-bits`, `--lstm`, `--graph` and the shape only apply when creating.
 
 ### `generate`
 ```
@@ -490,6 +591,8 @@ cmix-bit generate --state AUDIO_MEMORY --seconds S --out new.wav [options]
 | `--words FILE` | off | allowed words |
 | `--rhyme` | off | rough AABB rhyme |
 | `--best-of N` | 1 | candidates per line |
+| `--graph-plan` | off | plan from the graph (memory made with `--graph`) |
+| `--plan-strength S`, `--plan-temp T` | per type, 1 | how hard / how adventurously to plan |
 | `--out FILE` | screen | write to a file |
 | `--stats` | off | print statistics |
 
@@ -505,14 +608,19 @@ cmix-bit write --state MEMORY [--out FILE] [--suggest N] [--charset ...] [--no-s
 cmix-bit info MEMORY
 ```
 
+### `graph`
+```
+cmix-bit graph MEMORY [WORD] [--top N]
+```
+
 ### `compare`
 ```
-cmix-bit compare [--type text|image|audio|raw] [--width W --channels C] [--lstm N] FILE_A FILE_B
+cmix-bit compare [--type text|image|audio|raw] [--width W --channels C] [--lstm N] [--graph] FILE_A FILE_B
 ```
 
 ### `compress` / `decompress`
 ```
-cmix-bit compress [--type text|image|audio|raw] [--width W --channels C] [--lstm N] IN OUT.cmxb
+cmix-bit compress [--type text|image|audio|raw] [--width W --channels C] [--lstm N] [--graph] IN OUT.cmxb
 cmix-bit decompress IN.cmxb OUT
 ```
 

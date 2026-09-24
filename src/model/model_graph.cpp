@@ -181,15 +181,50 @@ std::vector<TokenGraph::Candidate> Model::graph_candidates(const Stream& s) cons
   return graph_->candidates(above, left);
 }
 
-int Model::plan_next_byte(const Stream& s) const {
+void Model::plan_bias(const Stream& s, double strength, double* weight) const {
   const GraphState& g = s.graph;
-  if (cfg_.type != DataType::Text || g.plan == GraphState::kNone || g.overflow) return -1;
-  const std::string* word = vocab_.word(g.plan);
-  if (!word || (int)word->size() < g.wlen || std::memcmp(word->data(), g.word, (size_t)g.wlen) != 0) return -1;
-  if ((int)word->size() == g.wlen) return ' ';
-  int ch = (uint8_t)(*word)[(size_t)g.wlen];
-  if (g.wlen == 0 && g.capital && ch < 0x80) ch = std::toupper(ch);
-  return ch;
+  if (!graph_ || g.plan == GraphState::kNone || strength <= 0) return;
+  const uint64_t rel = hist_.end() - std::min(hist_.end(), s.record_start);
+
+  if (cfg_.type == DataType::Text) {
+    if (g.overflow) return;
+    const std::string* word = vocab_.word(g.plan);
+    if (!word || (int)word->size() < g.wlen || std::memcmp(word->data(), g.word, (size_t)g.wlen) != 0) return;
+    int ch = (int)word->size() == g.wlen ? ' ' : (uint8_t)(*word)[(size_t)g.wlen];
+    if (g.wlen == 0 && g.capital && ch < 0x80) ch = std::toupper(ch);
+    weight[ch] *= 1.0 + strength;
+    return;
+  }
+
+  if (cfg_.type == DataType::Audio) {
+    // Only the high byte of a channel-0 sample carries loudness.
+    if (rel % 2 != 1 || (rel / 2) % (uint64_t)cfg_.channels != 0) return;
+    const int level = (int)(g.plan / 24);
+    const double target = std::pow(4.0, level) * 1.5;  // middle of the planned loudness band
+    const double now = g.n > 0 ? std::sqrt(g.sum_sq / g.n) : g.prev_rms;
+    const bool louder = now < target * 0.7, quieter = now > target * 1.4;
+    if (!louder && !quieter) return;
+    // Preference 0..1 per byte; the best byte gets (1 + strength) times the worst.
+    for (int c = 0; c < 256; ++c) {
+      const double mag = std::fabs((double)(int8_t)c * 256.0 + 128.0);
+      const double near_target = std::min(1.0, mag / target);
+      weight[c] *= std::pow(1.0 + strength, louder ? near_target : 1.0 - near_target);
+    }
+    return;
+  }
+
+  // Image: every channel byte of the planned run leans toward its brightness
+  // (and toward the dominant colour when the run has one).
+  const int code = (int)g.plan;
+  if (code >= kImageCodes) return;
+  const int colour = code % 4, mean = code / 36;
+  const int ch = (int)(rel % (uint64_t)cfg_.channels);
+  double target = mean * 32 + 16;
+  if (cfg_.channels >= 3 && colour < 3) target += ch == colour ? 20 : -10;
+  for (int c = 0; c < 256; ++c) {
+    const double d = (c - target) / 24.0;
+    weight[c] *= std::pow(1.0 + strength, std::exp(-d * d));
+  }
 }
 
 void Model::replan(Stream& s, Token t) const {
