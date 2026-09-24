@@ -168,6 +168,9 @@ void Model::learned_byte(const Stream& s) {
     graph_->add_order1(g.learn_t1 | kAboveRole, g.learn_next);
   if (cfg_.type == DataType::Text)
     vocab_.add(g.learn_next, std::string(g.done_word, (size_t)g.done_len));
+  // Keep the graph within its size limit (rare, unconfirmed nodes go first).
+  if (graph_->prune(cfg_.graph_max_nodes) > 0 && cfg_.type == DataType::Text)
+    vocab_.prune((uint32_t)cfg_.graph_confirm, graph_->tokens_in_use());
 }
 
 bool Model::graph_can_plan(const Stream& s) const {
@@ -256,6 +259,18 @@ void Model::plan_bias(const Stream& s, double strength, double* weight) const {
     const double d = (c - target) / 24.0;
     weight[c] *= std::pow(1.0 + strength, std::exp(-d * d));
   }
+}
+
+std::vector<TokenGraph::Candidate> Model::plan_candidates(const Stream& s) const {
+  std::vector<TokenGraph::Candidate> c = graph_candidates(s);
+  if (cfg_.type != DataType::Text) return c;
+  std::vector<TokenGraph::Candidate> out;
+  for (const auto& x : c) {
+    if (x.token == s.graph.t0 || x.token == s.graph.t1) continue;
+    const uint32_t freq = std::max<uint32_t>(1, vocab_.count(x.token));
+    out.push_back({x.token, x.weight / std::sqrt((double)freq)});
+  }
+  return out;
 }
 
 void Model::replan(Stream& s, Token t) const {

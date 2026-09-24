@@ -23,6 +23,7 @@ void save_config(Writer& w, const Config& c) {
   w.u32((uint32_t)c.graph_confirm);
   w.u8(c.snn ? 1 : 0);
   w.f32(c.snn_leak);
+  w.u32(c.graph_max_nodes);
 }
 
 Config load_config(Reader& r) {
@@ -43,6 +44,7 @@ Config load_config(Reader& r) {
   c.graph_confirm = (int)r.u32();
   c.snn = r.u8() != 0;
   c.snn_leak = r.f32();
+  c.graph_max_nodes = r.u32();
   if (c.table_bits < 16 || c.table_bits > 30 || c.history_bits < 16 || c.history_bits > 32)
     throw std::runtime_error("state file: bad table or history size");
   return c;

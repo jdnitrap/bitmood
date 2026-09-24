@@ -65,6 +65,13 @@ class TokenGraph {
     uint32_t count;
   };
   std::vector<Link> strongest(size_t n) const;
+  // Every token that still appears in the graph (as a source or a target).
+  std::unordered_map<Token, bool> tokens_in_use() const;
+
+  // Keeps the graph under max_nodes: when over, drops nodes to 75% of the
+  // cap, weakest first (nodes with no confirmed edge before any others,
+  // then by total count). Deterministic. Returns how many were dropped.
+  size_t prune(size_t max_nodes);
 
   void save(Writer& w) const;
   void load(Reader& r);
@@ -80,6 +87,8 @@ class TokenGraph {
 // Names for text tokens (word hash -> word), and how often each word was seen.
 class Vocab {
  public:
+  // Drops words seen fewer than min_count times that no longer appear in g.
+  void prune(uint32_t min_count, const std::unordered_map<Token, bool>& in_use);
   void add(Token t, const std::string& word);
   const std::string* word(Token t) const;
   uint32_t count(Token t) const;

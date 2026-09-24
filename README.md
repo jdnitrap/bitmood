@@ -1,4 +1,7 @@
-# Context-Mixing Bit Predictor
+# Bitmood
+
+**Bitmood** is a context-mixing bit predictor. (The program is still called
+`cmix-bit`.)
 
 **One-line idea:** instead of one big model guessing the next byte, use a handful
 of small, simple, *specialized* guessers — each one an expert in one kind of
@@ -189,7 +192,8 @@ With `--snn` the graph becomes a small spiking brain (design: the user's
 neuron spike; the spike charges the neurons its edges point to; charge
 leaks each step (`--snn-leak`, default 0.6), so tokens several steps back
 still count. The charged neurons are vote **N** and, with `--graph-plan`,
-the source of plans. Learning needs no backpropagation: the model's
+the source of plans. The graph is kept under `--graph-max-nodes` (default
+524,288) by pruning its weakest, never-confirmed nodes first. Learning needs no backpropagation: the model's
 surprise per unit, compared with its running average, acts like dopamine
 in a three-factor rule on the synapse weights (connections that made a
 good prediction are strengthened, bad ones weakened, and when surprised

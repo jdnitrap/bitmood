@@ -135,7 +135,7 @@ void Generator::plan_units() {
   for (Source& s : src_) {
     Model& m = *s.model;
     if (!m.graph_can_plan(s.stream)) continue;
-    const auto cands = m.graph_candidates(s.stream);
+    const auto cands = m.plan_candidates(s.stream);
     double total = 0;
     std::vector<double> w;
     for (const auto& c : cands) {

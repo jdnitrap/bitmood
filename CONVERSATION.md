@@ -114,7 +114,7 @@ dropped keys typed while a memory loaded (`TCSAFLUSH`).
 | types | `--type image` (PGM/PPM), `audio` (16-bit WAV), `raw`; specialists I and S; per-type views; `.ppm`/`.wav` output |
 | level 2 | Optional LSTM specialist L (`--lstm N`) |
 
-`make test` runs 84 end-to-end checks (round trips, memory identity,
+`make test` runs 86 end-to-end checks (round trips, memory identity,
 corruption, generation rules, pseudo-terminal `write`, types, LSTM).
 
 ## Measured
@@ -177,6 +177,33 @@ Measured:
   inside one file and CSS -> JavaScript; misses changes that don't raise
   surprise (text -> random digits). Looser thresholds gave 49-116 false
   alarms on the same test.
+
+## Training on 1 / 10 / 50 MB (Project Gutenberg novels)
+
+61 public-domain novels (51 MB after stripping headers); three held out
+(Jekyll and Hyde, Heart of Darkness, The Yellow Wallpaper, 377 KB).
+
+| | 1 MB | 10 MB | 50 MB |
+|---|---|---|---|
+| held-out bits/byte, plain | 1.963 | 1.884 | 1.870 |
+| held-out, graph + SNN | 1.964 | 1.879 | 1.857 |
+| plain, real words / known pairs | 95.7 / 69.5% | 96.9 / 78.1% | 97.5 / 85.2% |
+| graph + SNN + plan | 97.2 / 73.9% | 98.0 / 85.4% | 99.0 / 89.6% |
+| plain: time, RAM, memory | 6 s, 170, 37 MB | 57 s, 230, 46 MB | 293 s, 220, 46 MB |
+| graph + SNN (no cap): time, RAM, memory | 9 s, 194, 41 MB | 111 s, 372, 73 MB | 621 s, 763, 138 MB |
+
+Findings and fixes:
+- The default 32 MB table saturates after ~10 MB: `--table-bits 24` on
+  50 MB plain gives 1.780 held-out (5% better; 142 MB memory, 604 MB RAM).
+- The graph grew without limit (2.1 M nodes at 50 MB). Now capped at
+  `--graph-max-nodes` (default 524,288), pruning never-confirmed, weakest
+  nodes first: 50 MB graph + SNN -> 470 MB RAM, 96 MB memory, held-out
+  still 1.857.
+- Planning produced "the the" / "of the the" (planned common words). Plans
+  now skip the last two words and weight candidates by count / sqrt(word
+  frequency): doubled words 2.6% -> 0.3-0.4%. The known-pair score drops
+  (85 -> 82-86%), because it rewarded exactly those common pairs; the text
+  reads better.
 
 ## Known limits
 

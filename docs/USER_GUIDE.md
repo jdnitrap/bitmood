@@ -1,6 +1,6 @@
-# cmix-bit user guide
+# Bitmood user guide
 
-`cmix-bit` is a command-line tool that learns patterns in files one bit at a
+Bitmood (the program is `cmix-bit`) is a command-line tool that learns patterns in files one bit at a
 time and then uses what it learned to **write new text** (or pictures, or
 sounds), **help you write**, **compress files**, and **show you the
 structure** hidden in a file's bytes.
@@ -40,7 +40,7 @@ make
 make test
 ```
 
-`make test` runs 84 checks and should end with `all tests passed`.
+`make test` runs 86 checks and should end with `all tests passed`.
 It needs `python3` for a few of them.
 
 Run the program with no arguments to see every command:
@@ -419,7 +419,10 @@ comes next* in bigger units than bytes:
 | image | the shape of 8 pixels in a row (brightness, slope, texture, colour) | with this run above and that run to the left, this run came |
 
 An edge only counts once it has been seen twice ("needs a yes before it
-is a fact"); `--graph-confirm N` changes that number.
+is a fact"); `--graph-confirm N` changes that number. The graph is kept
+under `--graph-max-nodes N` nodes (default 524,288; 0 = no limit): when it
+grows past that, its weakest, never-confirmed nodes are dropped first. That
+keeps memory use reasonable on large training texts.
 
 ### Make a memory with a graph
 
@@ -489,7 +492,7 @@ run), what should come next from the graph, and lean toward it:
 
 | Option | Effect |
 |---|---|
-| `--graph-plan` | plan with the default strength for the memory's type |
+| `--graph-plan` | plan with the default strength for the memory's type. For text it skips the last two words (no "the the") and weakens very common words, so plans favour specific continuations |
 | `--plan-strength S` | how hard to lean toward the plan (defaults: text 4, audio 100, image 2) |
 | `--plan-temp T` | how adventurous the plans are (default: text follows `--temp`; audio and image 1 = as often as in the training data) |
 
@@ -602,7 +605,24 @@ longer.
 
 **Memory size.** A memory file is about 36 MB by default. With
 `--table-bits 18` it is about 6 MB, with `20` about 12 MB. More bits help
-only when you train on several MB of text.
+once you train on more than about 10 MB of text: on 50 MB of novels,
+`--table-bits 24` (a 142 MB memory) predicted unseen books 5% better than
+the default.
+
+**Training on a lot of text** (measured on 1, 10 and 50 MB of Project
+Gutenberg novels):
+
+| | 1 MB | 10 MB | 50 MB |
+|---|---|---|---|
+| bits/byte on books it never saw (plain) | 1.96 | 1.88 | 1.87 |
+| same, with `--graph --snn` | 1.96 | 1.88 | 1.86 |
+| real words in generated text (`--graph --snn --graph-plan`) | 97% | 98% | 98-99% |
+| training time (plain / graph + SNN) | 6 s / 9 s | 1 / 2 min | 5 / 11 min |
+
+Generated text sounds like the books, phrase by phrase; sentences still
+don't add up. With the default table the plain model stops improving after
+about 10 MB (use a bigger `--table-bits`); the graph keeps growing and is
+held under `--graph-max-nodes` (at 50 MB: 470 MB of RAM, a 96 MB memory).
 
 **Output quality.** The model learns spelling, words, phrases and style, not
 meaning. It won't keep a story or an argument going beyond about a
@@ -615,7 +635,7 @@ sentence. More training text, of one consistent style, helps most.
 ### `train`
 ```
 cmix-bit train --state MEMORY [--type text|image|audio|raw] [--table-bits 16..28]
-               [--lstm N] [--graph [--graph-confirm N] [--snn [--snn-leak L]]]
+               [--lstm N] [--graph [--graph-confirm N] [--graph-max-nodes N] [--snn [--snn-leak L]]]
                [--width W --channels 1|3] FILE...
 ```
 Creates the memory if it doesn't exist, otherwise keeps learning.

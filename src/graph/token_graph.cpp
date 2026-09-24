@@ -123,6 +123,43 @@ std::vector<TokenGraph::Link> TokenGraph::strongest(size_t n) const {
   return all;
 }
 
+std::unordered_map<Token, bool> TokenGraph::tokens_in_use() const {
+  std::unordered_map<Token, bool> used;
+  for (const auto& kv : out_) {
+    if (kv.first >> 63) used[(Token)(kv.first & 0xFFFFFFFFu)] = true;
+    for (const Edge& e : kv.second) used[e.to] = true;
+  }
+  return used;
+}
+
+size_t TokenGraph::prune(size_t max_nodes) {
+  if (max_nodes == 0 || out_.size() <= max_nodes) return 0;
+  struct Rank {
+    bool confirmed;
+    uint64_t total;
+    uint64_t key;
+  };
+  std::vector<Rank> r;
+  r.reserve(out_.size());
+  for (const auto& kv : out_) {
+    Rank x{false, 0, kv.first};
+    for (const Edge& e : kv.second) {
+      x.total += e.count;
+      x.confirmed = x.confirmed || e.count >= confirm_;
+    }
+    r.push_back(x);
+  }
+  // Weakest first: unconfirmed, then smaller totals, then key (for determinism).
+  std::sort(r.begin(), r.end(), [](const Rank& a, const Rank& b) {
+    if (a.confirmed != b.confirmed) return !a.confirmed;
+    if (a.total != b.total) return a.total < b.total;
+    return a.key < b.key;
+  });
+  const size_t target = max_nodes * 3 / 4, drop = out_.size() - target;
+  for (size_t i = 0; i < drop; ++i) out_.erase(r[i].key);
+  return drop;
+}
+
 void TokenGraph::save(Writer& w) const {
   w.u32(confirm_);
   std::vector<uint64_t> keys;
@@ -162,6 +199,13 @@ void TokenGraph::load(Reader& r) {
 }
 
 // ---- Vocab ------------------------------------------------------------------
+
+void Vocab::prune(uint32_t min_count, const std::unordered_map<Token, bool>& in_use) {
+  for (auto it = words_.begin(); it != words_.end();) {
+    if (it->second.count < min_count && !in_use.count(it->first)) it = words_.erase(it);
+    else ++it;
+  }
+}
 
 void Vocab::add(Token t, const std::string& word) {
   Entry& e = words_[t];

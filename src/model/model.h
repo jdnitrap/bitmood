@@ -106,6 +106,10 @@ class Model {
   // generator may pick which token to aim for.
   bool graph_can_plan(const Stream& s) const;
   std::vector<TokenGraph::Candidate> graph_candidates(const Stream& s) const;
+  // Candidates for planning: graph_candidates, and for text without the
+  // last two words (no "the the") and with very common words weakened
+  // (weight / sqrt(word frequency)), so plans favour specific continuations.
+  std::vector<TokenGraph::Candidate> plan_candidates(const Stream& s) const;
   void replan(Stream& s, Token t) const;  // kNoToken: nothing to plan
   // Steering toward the plan for the next byte: multiplies weight[c] for
   // bytes that move toward it. Text: the byte continuing the planned word.

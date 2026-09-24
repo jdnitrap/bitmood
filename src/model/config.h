@@ -29,6 +29,7 @@ struct Config {
   int lstm_cells = 0;      // level 2 LSTM specialist size (0 = off)
   bool graph = false;      // graph specialist G on
   int graph_confirm = 2;   // times an edge must be seen before it votes
+  uint32_t graph_max_nodes = 1u << 19;  // graph is pruned beyond this many nodes (0 = no limit)
   bool snn = false;        // spiking network on the graph (needs graph)
   float snn_leak = 0.6f;   // charge kept per token step (0..1)
 

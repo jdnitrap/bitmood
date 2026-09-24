@@ -168,6 +168,12 @@ check "graph summary lists 'the' among frequent words" "$BIN graph '$T/g1.st' | 
 check "graph WORD shows what follows it" "$BIN graph '$T/g1.st' the | grep -q '^after'"
 check "graph rejects an unseen word" "! $BIN graph '$T/g1.st' zzqqxx 2>/dev/null"
 $BIN train --state "$T/g3.st" --graph --graph-confirm 1000 --table-bits 18 README.md 2>/dev/null
+$BIN train --state "$T/gp1.st" --graph --graph-max-nodes 500 --table-bits 18 README.md CONVERSATION.md 2>/dev/null
+$BIN train --state "$T/gp2.st" --graph --graph-max-nodes 500 --table-bits 18 README.md 2>/dev/null
+$BIN train --state "$T/gp2.st" CONVERSATION.md 2>/dev/null
+nodes=$($BIN info "$T/gp1.st" | grep '^graph' | awk '{print $2}')
+check "--graph-max-nodes 500 keeps the graph within 500 nodes (has $nodes)" "[ '$nodes' -le 500 ] && [ '$nodes' -gt 0 ]"
+check "a pruned graph: one run == two runs" "cmp -s '$T/gp1.st' '$T/gp2.st'"
 check "--graph-confirm 1000 leaves every edge a candidate" "$BIN info '$T/g3.st' | grep -q '(0 confirmed'"
 check "--graph-plan needs a graph" "! $BIN generate 10 'The ' --state '$T/one.st' --graph-plan 2>/dev/null"
 p1=$($BIN generate 200 "The " --state "$T/g1.st" --graph-plan --seed 4 | md5sum)

@@ -136,7 +136,7 @@ std::string bar(double bpb) {
 }  // namespace
 
 int cmd_compare(int argc, char** argv, int start) {
-  Args a(argc, argv, start, {"type", "width", "channels", "lstm", "graph-confirm", "snn-leak"}, {"graph", "snn"});
+  Args a(argc, argv, start, {"type", "width", "channels", "lstm", "graph-confirm", "snn-leak", "graph-max-nodes"}, {"graph", "snn"});
   if (a.pos().size() != 2)
     throw std::runtime_error(
         "usage: compare [--type text|image|audio|raw] [--width W --channels C] [--lstm N] [--graph] <fileA> <fileB>");

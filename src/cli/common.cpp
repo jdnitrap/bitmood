@@ -25,6 +25,11 @@ Config config_from_args(const Args& a) {
   if (a.has("graph")) cfg.graph = true;
   if (a.has("graph-confirm")) cfg.graph_confirm = (int)a.integer("graph-confirm", 2);
   if (a.has("snn")) cfg.snn = true;
+  if (a.has("graph-max-nodes")) {
+    long long n = a.integer("graph-max-nodes", 0);
+    if (n < 0 || n > 0xFFFFFFFFll) throw std::runtime_error("--graph-max-nodes must be 0 (no limit) or a node count");
+    cfg.graph_max_nodes = (uint32_t)n;
+  }
   if (a.has("snn-leak")) cfg.snn_leak = (float)a.num("snn-leak", 0.6);
   if (a.has("lstm")) {
     long long n = a.integer("lstm", 0);
