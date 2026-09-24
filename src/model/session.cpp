@@ -24,7 +24,10 @@ double Session::learn_bit(int bit) {
     byte_bits_ = 0;
   }
   next(bit);
-  if (byte_done) m_.learned_byte(s_);  // the graph learns once the context has moved
+  if (byte_done) {
+    m_.note_audio_sample(s_);          // history already holds this byte
+    m_.learned_byte(s_);               // the graph learns once the context has moved
+  }
   return cost;
 }
 

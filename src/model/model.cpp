@@ -1,6 +1,7 @@
 #include "model/model.h"
 
 #include <cctype>
+#include <cmath>
 #include <stdexcept>
 
 #include "core/hash.h"
@@ -70,10 +71,13 @@ Model::Model(const Config& cfg)
             cfg.snn_vote_inputs()),
       n_inputs_(bias_ + 1),
       table_(cfg.table_bits),
+      low_(18),
       tracker_(grid_.num_views()),
       final_(kMixers + 1, 8, 0.3f),
+      blend_(5, 8, 0.0f),
       apm1_(256),
-      apm2_(257 * 256) {
+      apm2_(257 * 256),
+      apm3_(4 * 256) {
   if (n_inputs_ > kMaxInputs) throw std::runtime_error("too many model inputs");
   if (cfg.lstm_cells > 0) lstm_ = std::make_unique<Lstm>(cfg.lstm_cells);
   typed_first_ = grid_first_ - cfg.snn_table_inputs() - cfg.graph_table_inputs() - cfg.image_inputs() -
@@ -92,10 +96,14 @@ Model::Model(const Config& cfg)
   if (cfg.type == DataType::Image && (cfg.width <= 0 || cfg.channels <= 0))
     throw std::runtime_error("image model needs width and channels");
   if (cfg.type == DataType::Audio && cfg.channels <= 0) throw std::runtime_error("audio model needs channels");
-  mix_.emplace_back(n_inputs_, 4 * 8, 0.2f);                         // match state x bit position
-  mix_.emplace_back(n_inputs_, 257, 0.2f);                           // previous byte
-  // winning grid view x bit position (x new-region flag with the SNN)
-  mix_.emplace_back(n_inputs_, (grid_.num_views() + 1) * 8 * (cfg.snn ? 2 : 1), 0.2f);
+  mix_.emplace_back(n_inputs_, 4 * 8, 0.2f);                // match state x bit position
+  mix_.emplace_back(n_inputs_, 257, 0.2f);                  // previous byte
+  // winning grid view x bit position, and a copy used after a surprise jump
+  mix_.emplace_back(n_inputs_, (grid_.num_views() + 1) * 8 * 2, 0.2f);
+  // (mix + bit-so-far + 2 * previous-byte) / 4. Match refinement starts at 0.
+  const float blend_row[5] = {0.25f, 0.25f, 0.50f, 0.0f, 0.0f};
+  for (int set = 0; set < 8; ++set)
+    for (int i = 0; i < 5; ++i) blend_.set(i, set, blend_row[i]);
 }
 
 std::string Model::input_name(int i) const {
@@ -246,12 +254,13 @@ int Model::predict(const Stream& s, BitPos bp, Votes& v) const {
   contexts(s, cx);
   for (int i = 0; i < n_ctx_; ++i) {
     v.ctx[i] = hash_add(cx[i] + (uint64_t)i * 0x9E3779B97F4A7C15ull, bp.key());
-    const int64_t slot = table_.lookup(v.ctx[i]);
-    if (slot < 0 || table_.n((uint32_t)slot) == 0) {
+    const ContextTable& table = i < 2 ? low_ : table_;
+    const int64_t slot = table.lookup(v.ctx[i]);
+    if (slot < 0 || table.n((uint32_t)slot) == 0) {
       v.p[i] = 32768;  // never seen: no opinion
       v.x[i] = 0.0f;
     } else {
-      v.p[i] = table_.p((uint32_t)slot);
+      v.p[i] = table.p((uint32_t)slot);
       v.x[i] = stretch(v.p[i]);
     }
   }
@@ -287,9 +296,8 @@ int Model::predict(const Stream& s, BitPos bp, Votes& v) const {
 
   v.sel[0] = MatchModel::state(hist_, s, bp) * 8 + bp.index;
   v.sel[1] = s.last_byte + 1;
-  v.sel[2] = tracker_.best() * 8 + bp.index;
-  // Change detection: right after a surprise jump, a separate weight set.
-  if (cfg_.snn) v.sel[2] = v.sel[2] * 2 + (snn_region_ > 0 ? 1 : 0);
+  // The odd set is the copy opened by a surprise jump (byte cost or the SNN).
+  v.sel[2] = (tracker_.best() * 8 + bp.index) * 2 + ((adapt_region_ > 0 || snn_region_ > 0) ? 1 : 0);
   float xf[kMixers + 1];
   for (int k = 0; k < kMixers; ++k) {
     v.z[k] = clampf(mix_[(size_t)k].dot(v.x, v.sel[k]), -15.0f, 15.0f);
@@ -300,17 +308,30 @@ int Model::predict(const Stream& s, BitPos bp, Votes& v) const {
   v.zf = clampf(final_.dot(xf, v.final_set), -15.0f, 15.0f);
   const int pmix = to_p16(squash(v.zf));
 
-  // Refine with two APMs: order 0 (bits so far) and order 1 (previous byte too).
+  // Three refinements of the mixed probability: bits so far, previous byte,
+  // and match state. A small mixer learns how to blend them (per bit).
   const int a1 = apm1_.refine(pmix, bp.key(), v.apm_slot[0]);
   const int a2 = apm2_.refine(pmix, (size_t)(s.last_byte + 1) * 256 + bp.key(), v.apm_slot[1]);
-  v.mixed = clampi((pmix + a1 + 2 * a2 + 2) / 4, kProbMin, kProbMax);
+  const int a3 = apm3_.refine(pmix, (size_t)(v.sel[0] / 8) * 256 + bp.key(), v.apm_slot[2]);
+  // Probability space, so the initial weights 1/4, 1/4, 1/2, 0 reproduce
+  // (pmix + a1 + 2*a2) / 4. The mixer then moves those weights per bit.
+  v.blend_x[0] = pmix / 65536.0f;
+  v.blend_x[1] = a1 / 65536.0f;
+  v.blend_x[2] = a2 / 65536.0f;
+  v.blend_x[3] = a3 / 65536.0f;
+  v.blend_x[4] = 0.0f;
+  v.blend_set = bp.index;
+  v.blend_z = clampf(blend_.dot(v.blend_x, v.blend_set), 1.0f / 65536.0f, 1.0f - 1.0f / 65536.0f);
+  v.mixed = to_p16(v.blend_z);
   return v.mixed;
 }
 
 void Model::learn(const Stream& s, BitPos bp, const Votes& v, int bit) {
   (void)s;
   const float target = (float)bit;
-  const float lr = mixer_lr(bytes_learned);
+  float lr = mixer_lr(bytes_learned);
+  // The copied weight set has no history of its own yet, so it learns faster.
+  if (adapt_region_ > 0 || snn_region_ > 0) lr = std::min(0.05f, std::max(lr * 4.0f, 0.02f));
   float xf[kMixers + 1];
   for (int k = 0; k < kMixers; ++k) {
     mix_[(size_t)k].learn(v.x, v.sel[k], target - squash(v.z[k]), lr);
@@ -318,8 +339,23 @@ void Model::learn(const Stream& s, BitPos bp, const Votes& v, int bit) {
   }
   xf[kMixers] = 0.5f;
   final_.learn(xf, v.final_set, target - squash(v.zf), 0.002f);
+  // Slow on purpose: a faster rate walked off the (1, 1, 2) blend and cost
+  // about 2 KB on a 750 KB novel.
+  blend_.learn(v.blend_x, v.blend_set, target - v.blend_z, 0.00002f);
 
-  for (int i = 0; i < n_ctx_; ++i) table_.update(table_.claim(v.ctx[i]), bit, limit_for(i));
+  for (int i = 0; i < n_ctx_; ++i) {
+    ContextTable& table = i < 2 ? low_ : table_;
+    // Orders 6 and 8 take a slot only on the second sighting, so a hash seen
+    // once cannot evict a useful one. Orders 0 and 1 live in low_. Shorter
+    // orders, words, classes and the grid repeat often enough to claim now.
+    const bool second_sight = i >= 6 && i < kOrderInputs;
+    int64_t slot = table.lookup(v.ctx[i]);
+    if (slot < 0) {
+      if (second_sight && !table.promote(v.ctx[i])) continue;
+      slot = table.claim(v.ctx[i]);
+    }
+    table.update((uint32_t)slot, bit, limit_for(i));
+  }
   if (cfg_.snn) {
     snn_unit_bits_ += bit_cost(v.mixed, bit);
     if (bp.index == 7 && ++snn_unit_bytes_ >= kSnnMaxUnitBytes) {
@@ -339,6 +375,7 @@ void Model::learn(const Stream& s, BitPos bp, const Votes& v, int bit) {
   match_.learn(v.match_slot, bit);
   apm1_.update(v.apm_slot[0], bit);
   apm2_.update(v.apm_slot[1], bit);
+  apm3_.update(v.apm_slot[2], bit);
   tracker_.learn(v.p[kInputA], v.p + grid_first_, bit);
 }
 
@@ -346,7 +383,8 @@ void Model::learn_byte(const Stream& s, uint8_t b) {
   if (lstm_) lstm_->learn(s.lstm, b);
 }
 
-void Model::begin_record(Stream& s) const {
+void Model::begin_record(Stream& s) {
+  audio_prev_ = 0;
   s.record_start = hist_.end();
   // A new image / sound starts a new slice or run.
   s.graph.n = 0;
@@ -390,6 +428,8 @@ void Model::save(Writer& w) const {
   w.vec_u8(hist_.data());
   w.tag("TABL");
   table_.save(w);
+  w.tag("LOWT");
+  low_.save(w);
   w.tag("MTCH");
   match_.save(w);
   w.tag("TRAK");
@@ -397,9 +437,12 @@ void Model::save(Writer& w) const {
   w.tag("MIXR");
   for (const Mixer& m : mix_) m.save(w);
   final_.save(w);
+  w.tag("BLND");
+  blend_.save(w);
   w.tag("APMS");
   apm1_.save(w);
   apm2_.save(w);
+  apm3_.save(w);
   if (lstm_) {
     w.tag("LSTM");
     lstm_->save(w);
@@ -425,6 +468,14 @@ void Model::save(Writer& w) const {
   w.u64(bytes_learned);
   w.f64(bits_spent);
   w.f64(recent_bpb);
+  w.f64(adapt_fast_);
+  w.f64(adapt_slow_);
+  w.i32(adapt_region_);
+  w.i32(adapt_cool_);
+  w.f64(audio_sum_sq_);
+  w.u64(audio_n_);
+  w.u64(audio_zc_);
+  w.i32(audio_prev_);
 }
 
 void Model::load(Reader& r) {
@@ -437,6 +488,8 @@ void Model::load(Reader& r) {
   match_.rebuild(hist_);
   r.expect_tag("TABL");
   table_.load(r);
+  r.expect_tag("LOWT");
+  low_.load(r);
   r.expect_tag("MTCH");
   match_.load(r);
   r.expect_tag("TRAK");
@@ -444,9 +497,12 @@ void Model::load(Reader& r) {
   r.expect_tag("MIXR");
   for (Mixer& m : mix_) m.load(r);
   final_.load(r);
+  r.expect_tag("BLND");
+  blend_.load(r);
   r.expect_tag("APMS");
   apm1_.load(r);
   apm2_.load(r);
+  apm3_.load(r);
   if (lstm_) {
     r.expect_tag("LSTM");
     lstm_->load(r);
@@ -472,6 +528,113 @@ void Model::load(Reader& r) {
   bytes_learned = r.u64();
   bits_spent = r.f64();
   recent_bpb = r.f64();
+  adapt_fast_ = r.f64();
+  adapt_slow_ = r.f64();
+  adapt_region_ = r.i32();
+  adapt_cool_ = r.i32();
+  audio_sum_sq_ = r.f64();
+  audio_n_ = r.u64();
+  audio_zc_ = r.u64();
+  audio_prev_ = r.i32();
+}
+
+void Model::note_byte_cost(double bits) {
+  const double rate = std::max(1.0 / 4096.0, 1.0 / (double)(bytes_learned + 1));
+  recent_bpb += rate * (bits - recent_bpb);
+  if (bytes_learned == 0) {
+    adapt_fast_ = adapt_slow_ = bits;
+  } else {
+    adapt_fast_ += (bits - adapt_fast_) / 32.0;
+    adapt_slow_ += (bits - adapt_slow_) / 2048.0;
+  }
+  if (adapt_region_ > 0) {
+    --adapt_region_;
+    return;
+  }
+  if (adapt_cool_ > 0) {
+    --adapt_cool_;
+    return;
+  }
+  // A short average well above the long one means the file changed character.
+  // Twice the long-run cost, plus 1.5 bits: a new kind of data, not a hard sentence.
+  if (snn_region_ > 0 || bytes_learned < 4096) return;
+  if (adapt_fast_ > adapt_slow_ * 2.0 + 1.5) {
+    adapt_region_ = 2048;
+    adapt_cool_ = 4096;
+    open_region(true);
+  }
+}
+
+void Model::open_region(bool forget) {
+  Mixer& m = mix_[2];
+  const int groups = grid_.num_views() + 1;
+  for (int g = 0; g < groups; ++g)
+    for (int b = 0; b < 8; ++b) m.copy_set((g * 8 + b) * 2, (g * 8 + b) * 2 + 1);
+  if (!forget) return;
+  table_.halve_counts();
+  low_.halve_counts();
+}
+
+double Model::audio_rms() const {
+  return audio_n_ > 0 ? std::sqrt(audio_sum_sq_ / (double)audio_n_) : 0.0;
+}
+
+double Model::audio_zc_rate() const {
+  return audio_n_ > 0 ? (double)audio_zc_ / (double)audio_n_ : 0.0;
+}
+
+void Model::note_audio_sample(const Stream& s) {
+  if (cfg_.type != DataType::Audio || cfg_.channels <= 0) return;
+  const uint64_t end = hist_.end();
+  const uint64_t rel = end - std::min(end, s.record_start);
+  if (rel < 2) return;
+  const uint64_t frame = 2ull * (uint64_t)cfg_.channels;
+  if ((rel - 1) % frame != 1) return;  // channel 0, high byte just written
+  if (!hist_.has(end - 2) || !hist_.has(end - 1)) return;
+  const int16_t sample = (int16_t)(hist_.at(end - 2) | (hist_.at(end - 1) << 8));
+  audio_sum_sq_ += (double)sample * (double)sample;
+  const int sign = sample > 0 ? 1 : (sample < 0 ? -1 : 0);
+  if (sign != 0 && audio_prev_ != 0 && sign != audio_prev_) ++audio_zc_;
+  if (sign != 0) audio_prev_ = sign;
+  ++audio_n_;
+}
+
+int Model::preferred_byte(const Stream& s) const {
+  if (cfg_.type == DataType::Image && cfg_.width > 0 && cfg_.channels > 0) {
+    const uint64_t pos = hist_.end();
+    const uint64_t rel = pos - std::min(pos, s.record_start);
+    const int c = cfg_.channels;
+    const int row = cfg_.row_bytes();
+    auto px = [&](uint64_t back) -> int {
+      return (back >= 1 && back <= rel && hist_.has(pos - back)) ? hist_.at(pos - back) : 0;
+    };
+    const int W = px((uint64_t)c), N = px((uint64_t)row), NW = px((uint64_t)(row + c));
+    return clamp255(W + N - NW);
+  }
+  if (cfg_.type != DataType::Audio || cfg_.channels <= 0 || hist_.empty()) return -1;
+  const uint64_t pos = hist_.end();
+  const uint64_t rel = pos - std::min(pos, s.record_start);
+  if ((rel & 1) == 0) return -1;  // low byte: leave it to the model
+  const uint64_t frame = 2ull * (uint64_t)cfg_.channels;
+  if ((rel / 2) % (uint64_t)cfg_.channels != 0) return -1;
+  const uint64_t sample_start = rel - 1;
+  auto sample = [&](uint64_t k) -> int {
+    if (sample_start < k * frame) return 0;
+    const uint64_t at = pos - (rel - (sample_start - k * frame));
+    if (!hist_.has(at) || !hist_.has(at + 1)) return 0;
+    return (int16_t)(hist_.at(at) | (hist_.at(at + 1) << 8));
+  };
+  const int pred = std::max(-32768, std::min(32767, 2 * sample(1) - sample(2)));
+  return ((pred - hist_.back(0) + 128) >> 8) & 0xFF;
+}
+
+void Model::sample_bias(const Stream& s, double* weight) const {
+  const int prefer = preferred_byte(s);
+  if (prefer < 0) return;
+  for (int c = 0; c < 256; ++c) {
+    const double d = (c - prefer) / 32.0;
+    weight[c] *= std::exp(-0.5 * d * d);
+  }
 }
 
 }  // namespace cmix

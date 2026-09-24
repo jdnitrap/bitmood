@@ -22,6 +22,9 @@ class Mixer {
   float dot(const float* x, int set) const;
   // err = bit - p (p in 0..1). lr is the learning rate.
   void learn(const float* x, int set, float err, float lr);
+  void set(int input, int set, float weight);
+  // Copy one weight set onto another (a new region starts from the current trust).
+  void copy_set(int from, int to);
   float weight(int i, int set) const { return w_[(size_t)set * n_ + i]; }
   void save(Writer& w) const { w.vec_f32(w_); }
   void load(Reader& r);

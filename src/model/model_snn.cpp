@@ -163,6 +163,10 @@ void Model::snn_track_change(double u) {
   if (snn_region_ == 0 && snn_fast_ > snn_slow_ * 2.0 + 1.0) {
     snn_region_ = 128;
     ++snn_changes_;
+    // Same weight-set copy the byte-level detector uses. Skip it when that
+    // detector already opened the region for this stretch.
+    if (adapt_region_ == 0) open_region(true);
+    if (adapt_cool_ < 2048) adapt_cool_ = 2048;
   }
 }
 

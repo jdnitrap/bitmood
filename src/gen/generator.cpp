@@ -165,6 +165,23 @@ uint8_t Generator::next() {
   distribution(model_p);
   // Steer toward planned words: boost the byte that continues each source's plan.
   ByteProbs steer = model_p;
+  {
+    double pull[256];
+    std::fill(pull, pull + 256, 1.0);
+    bool pulled = false;
+    for (const Source& s : src_) {
+      double one[256];
+      std::fill(one, one + 256, 1.0);
+      s.model->sample_bias(s.stream, one);
+      for (int c = 0; c < 256; ++c)
+        if (one[c] != 1.0) {
+          pulled = true;
+          pull[c] *= one[c];
+        }
+    }
+    if (pulled)
+      for (int c = 0; c < 256; ++c) steer[c] *= pull[c];
+  }
   if (opt_.plan && opt_.plan_strength != 0) {
     double w[256];
     for (const Source& s : src_) {

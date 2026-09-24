@@ -191,8 +191,10 @@ bool Model::graph_can_plan(const Stream& s) const {
 
 std::vector<TokenGraph::Candidate> Model::graph_candidates(const Stream& s) const {
   if (!graph_) return {};
-  // With the SNN, plans come from the charged neurons (they remember further back).
-  if (cfg_.snn) {
+  // Audio and image plans can come from charge (it remembers further back).
+  // Text stays on confirmed edge counts: planning from charge cut known
+  // word pairs from about 65% to 55%. Charge is still vote N.
+  if (cfg_.snn && cfg_.type != DataType::Text) {
     std::vector<TokenGraph::Candidate> c;
     for (int i = 0; i < s.snn.n; ++i)
       if (!snn_role_token(s.snn.tok[i])) c.push_back({s.snn.tok[i], s.snn.charge[i]});

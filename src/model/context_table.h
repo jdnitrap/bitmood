@@ -29,8 +29,15 @@ class ContextTable {
 
   int p(uint32_t i) const { return slots_[i].p; }
   int n(uint32_t i) const { return slots_[i].n; }
-  // Moves p toward the bit at rate 1/(n + 1.5); n stops growing at `limit`.
+  // Moves p toward the bit at rate 1/(n + 1.5). n stops growing at `limit`.
+  // A new region halves n (halve_counts) so a familiar context can move again.
   void update(uint32_t i, int bit, int limit);
+  // First miss of h is remembered and returns false. The next miss of the
+  // same check returns true, and the caller may claim a slot. One pending
+  // check per bucket: a different context replaces it.
+  bool promote(uint64_t h);
+  // Halve every slot's update count. Used when a new region starts.
+  void halve_counts();
 
   size_t size() const { return slots_.size(); }
   void save(Writer& w) const;
@@ -46,7 +53,8 @@ class ContextTable {
   static uint16_t check_of(uint64_t h) { return (uint16_t)((h & 0xFFFF) | 1); }
   size_t bucket_of(uint64_t h) const { return (size_t)((h >> 16) & mask_) * kBucket; }
   std::vector<Slot> slots_;
-  uint64_t mask_;  // number of buckets - 1
+  std::vector<uint16_t> witness_;  // one pending check per bucket, 0 = none
+  uint64_t mask_;                  // number of buckets - 1
 };
 
 }  // namespace cmix

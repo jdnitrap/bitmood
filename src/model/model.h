@@ -1,7 +1,8 @@
 // The model: everything that is learned and kept in a state file.
 //
 //   predict()      - const: every specialist votes, the mixers combine the
-//                    votes, two APM stages refine the result
+//                    votes, three refinements and a small mixer produce the
+//                    final probability
 //   learn()        - update every table, mixer and APM from the real bit
 //   advance_byte() - move the context forward over a finished byte
 //
@@ -77,7 +78,10 @@ class Model {
     float z[kMixers] = {};         // mixer outputs, stretch space
     int final_set = 0;
     float zf = 0;                  // final mixer output
-    uint32_t apm_slot[2] = {};
+    uint32_t apm_slot[3] = {};
+    float blend_x[5] = {};         // mix, bit-so-far, previous byte, match, bias
+    float blend_z = 0;
+    int blend_set = 0;
     int mixed = 32768;             // final P(bit = 1), 16-bit
     float snn_raw = 0;             // text N vote before the readout (for learning it)
   };
@@ -100,7 +104,7 @@ class Model {
   void learned_byte(const Stream& s);
   // Marks the start of a new record (an image or a sound) at the current
   // position, so pixel and sample positions count from here.
-  void begin_record(Stream& s) const;
+  void begin_record(Stream& s);
 
   // Graph planning (generation): at the start of a word / slice / run the
   // generator may pick which token to aim for.
@@ -116,6 +120,10 @@ class Model {
   // Audio: louder or quieter high bytes, toward the planned slice's loudness.
   // Image: values near the planned run's brightness and colour.
   void plan_bias(const Stream& s, double strength, double* weight) const;
+  // Pulls sampling toward a specialist that already matches the bytes.
+  // Image: left + above - above-left. Audio: high byte of the linear trend.
+  // Text and raw: no pull.
+  void sample_bias(const Stream& s, double* weight) const;
   const TokenGraph* graph() const { return graph_.get(); }
   const Vocab& vocab() const { return vocab_; }
   // Audio slice length in samples.
@@ -130,15 +138,23 @@ class Model {
   uint64_t bytes_learned = 0;
   double bits_spent = 0;  // sum of -log2 P(real bit) while learning
   double recent_bpb = 0;  // bits/byte over roughly the last 4096 bytes learned
-  void note_byte_cost(double bits) {
-    const double rate = std::max(1.0 / 4096.0, 1.0 / (double)(bytes_learned + 1));
-    recent_bpb += rate * (bits - recent_bpb);
-  }
+  // Updates recent_bpb. A sustained jump opens a new mixer region.
+  void note_byte_cost(double bits);
+  // Channel-0 loudness of audio this model has learned. Zeros for other types.
+  uint64_t audio_samples() const { return audio_n_; }
+  double audio_rms() const;
+  double audio_zc_rate() const;
+  // Call after a learned byte has been pushed into history.
+  void note_audio_sample(const Stream& s);
 
   void save(Writer& w) const;
   void load(Reader& r);
 
  private:
+  // Copy the grid mixer's weights into the region set. When forget is set,
+  // also halve context counts so old probabilities can move.
+  void open_region(bool forget);
+  int preferred_byte(const Stream& s) const;
   void contexts(const Stream& s, uint64_t* out) const;  // byte-level hashes of table inputs
   void image_contexts(const Stream& s, uint64_t* out) const;
   void audio_contexts(const Stream& s, uint64_t* out) const;
@@ -162,6 +178,14 @@ class Model {
   double snn_fast_ = 0, snn_slow_ = 0;
   int snn_region_ = 0;
   uint64_t snn_changes_ = 0;
+  // Byte-level surprise (fast ~32 bytes, slow ~2048). A jump opens adapt_region_
+  // bytes of a copied mixer weight set. adapt_cool_ blocks a second jump.
+  double adapt_fast_ = 0, adapt_slow_ = 0;
+  int adapt_region_ = 0, adapt_cool_ = 0;
+  // Training audio, channel 0, for generation to aim at.
+  double audio_sum_sq_ = 0;
+  uint64_t audio_n_ = 0, audio_zc_ = 0;
+  int audio_prev_ = 0;
 
  public:
   // Units left in the current "new region" (0 = none) and jumps seen so far.
@@ -189,11 +213,13 @@ class Model {
   int bias_ = 0;
   int n_inputs_ = 0;
   ContextTable table_;
+  ContextTable low_;  // orders 0 and 1, kept out of the shared hash table
   MatchModel match_;
   ViewTracker tracker_;
   std::vector<Mixer> mix_;
   Mixer final_;
-  Apm apm1_, apm2_;
+  Mixer blend_;  // learned blend of the mix and three refinements
+  Apm apm1_, apm2_, apm3_;
   std::unique_ptr<Lstm> lstm_;
   std::unique_ptr<TokenGraph> graph_;
   Vocab vocab_;

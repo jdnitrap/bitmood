@@ -21,6 +21,7 @@ ContextTable::ContextTable(int bits) {
   if (bits < 4 || bits > 30) throw std::runtime_error("context table bits must be 4..30");
   slots_.resize(size_t(1) << bits);
   mask_ = (uint64_t(1) << bits) / kBucket - 1;
+  witness_.assign(slots_.size() / kBucket, 0);
 }
 
 int64_t ContextTable::lookup(uint64_t h) const {
@@ -51,18 +52,37 @@ uint32_t ContextTable::claim(uint64_t h) {
 
 void ContextTable::update(uint32_t i, int bit, int limit) {
   Slot& s = slots_[i];
+  const int n = s.n < 1024 ? s.n : 1023;
   const int target = bit ? 65535 : 0;
-  int p = s.p + (int)(((int64_t)(target - s.p) * kRate.r[s.n]) >> 16);
+  int p = s.p + (int)(((int64_t)(target - s.p) * kRate.r[n]) >> 16);
   s.p = (uint16_t)(p < 1 ? 1 : (p > 65535 ? 65535 : p));
   if (s.n < limit) ++s.n;
 }
 
+bool ContextTable::promote(uint64_t h) {
+  uint16_t& w = witness_[bucket_of(h) / kBucket];
+  const uint16_t c = check_of(h);
+  if (w == c) {
+    w = 0;
+    return true;
+  }
+  w = c;
+  return false;
+}
+
+void ContextTable::halve_counts() {
+  for (Slot& s : slots_)
+    if (s.n > 1) s.n = (uint16_t)(s.n / 2);
+}
+
 void ContextTable::save(Writer& w) const {
   w.u16_array(reinterpret_cast<const uint16_t*>(slots_.data()), slots_.size() * 4);
+  w.vec_u16(witness_);
 }
 
 void ContextTable::load(Reader& r) {
   r.u16_array(reinterpret_cast<uint16_t*>(slots_.data()), slots_.size() * 4);
+  r.vec_u16_exact(witness_, witness_.size());
 }
 
 }  // namespace cmix

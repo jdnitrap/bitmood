@@ -48,4 +48,9 @@ double typical_line_length(const std::vector<uint8_t>& text);
 Candidate best_of_line(Generator& g, const BestOfOptions& o, std::shared_ptr<const SuffixArray> training,
                        uint64_t seed, uint64_t unit);
 
+// For each slice, write several candidates and keep the one whose loudness and
+// zero-crossing rate sit closest to the training audio (channel 0).
+void best_of_audio(Generator& g, int candidates, int slice_bytes, int channels, double target_rms,
+                   double target_zc, uint64_t seed, long long nbytes);
+
 }  // namespace cmix

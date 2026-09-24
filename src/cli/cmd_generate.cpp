@@ -1,4 +1,5 @@
 // generate: write new bytes from one or more memories.
+#include <algorithm>
 #include <cstdio>
 #include <iostream>
 #include <stdexcept>
@@ -46,7 +47,13 @@ int cmd_generate(int argc, char** argv, int start) {
   gen.feed_constraints(std::vector<uint8_t>(prompt.begin(), prompt.end()));
   gen.begin_output();
 
-  if (best_of > 1) {
+  if (cfg.type == DataType::Audio && !setup.models.empty() && setup.models[0]->audio_samples() > 32) {
+    const Model& m = *setup.models[0];
+    const int channels = std::max(1, cfg.channels);
+    const int slice = m.slice_samples() * 2 * channels;
+    const int cands = best_of > 1 ? (int)best_of : 4;
+    best_of_audio(gen, cands, slice, channels, m.audio_rms(), m.audio_zc_rate(), opt.seed, n);
+  } else if (best_of > 1) {
     BestOfOptions bo;
     bo.candidates = (int)best_of;
     const double t = gen.training_bits_per_byte();
