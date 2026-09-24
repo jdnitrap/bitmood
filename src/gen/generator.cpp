@@ -139,7 +139,8 @@ void Generator::plan_units() {
     double total = 0;
     std::vector<double> w;
     for (const auto& c : cands) {
-      w.push_back(std::pow(c.weight, 1.0 / opt_.plan_temp));
+      const double pt = opt_.plan_temp > 0 ? opt_.plan_temp : (m.config().type == DataType::Text ? opt_.temp : 1.0);
+      w.push_back(std::pow(c.weight, 1.0 / pt));
       total += w.back();
     }
     Token pick = kNoToken;

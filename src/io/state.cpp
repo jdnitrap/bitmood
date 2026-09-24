@@ -21,6 +21,8 @@ void save_config(Writer& w, const Config& c) {
   w.u8((uint8_t)c.lstm_cells);
   w.u8(c.graph ? 1 : 0);
   w.u32((uint32_t)c.graph_confirm);
+  w.u8(c.snn ? 1 : 0);
+  w.f32(c.snn_leak);
 }
 
 Config load_config(Reader& r) {
@@ -39,6 +41,8 @@ Config load_config(Reader& r) {
   if (c.lstm_cells > LstmState::kMaxCells) throw std::runtime_error("state file: bad LSTM size");
   c.graph = r.u8() != 0;
   c.graph_confirm = (int)r.u32();
+  c.snn = r.u8() != 0;
+  c.snn_leak = r.f32();
   if (c.table_bits < 16 || c.table_bits > 30 || c.history_bits < 16 || c.history_bits > 32)
     throw std::runtime_error("state file: bad table or history size");
   return c;
@@ -78,6 +82,20 @@ void save_stream(Writer& w, const Stream& s) {
   w.i32(g.last_sign);
   w.f64(g.sum_sq);
   w.f64(g.prev_rms);
+  const SnnState& n = s.snn;
+  w.i32(n.n);
+  for (int i = 0; i < SnnState::kMaxCharged; ++i) {
+    w.u32(n.tok[i]);
+    w.f32(n.charge[i]);
+  }
+  w.i32(n.nf);
+  for (int i = 0; i < SnnState::kMaxFired; ++i) {
+    w.u32(n.fired[i]);
+    w.f32(n.trace[i]);
+  }
+  w.u32(n.predicted);
+  for (float t : n.tree) w.f32(t);
+  w.u8(n.tree_ready);
   w.u64(s.line_start);
   w.u64(s.prev_line_start);
   s.widths.save(w);
@@ -120,6 +138,22 @@ Stream load_stream(Reader& r) {
   g.last_sign = r.i32();
   g.sum_sq = r.f64();
   g.prev_rms = r.f64();
+  SnnState& n = s.snn;
+  n.n = r.i32();
+  for (int i = 0; i < SnnState::kMaxCharged; ++i) {
+    n.tok[i] = r.u32();
+    n.charge[i] = r.f32();
+  }
+  n.nf = r.i32();
+  for (int i = 0; i < SnnState::kMaxFired; ++i) {
+    n.fired[i] = r.u32();
+    n.trace[i] = r.f32();
+  }
+  if (n.n < 0 || n.n > SnnState::kMaxCharged || n.nf < 0 || n.nf > SnnState::kMaxFired)
+    throw std::runtime_error("state file: bad SNN state");
+  n.predicted = r.u32();
+  for (float& t : n.tree) t = r.f32();
+  n.tree_ready = r.u8() != 0;
   s.line_start = r.u64();
   s.prev_line_start = r.u64();
   s.widths.load(r);

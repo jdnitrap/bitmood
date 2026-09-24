@@ -42,7 +42,9 @@ struct GenOptions {
   // How hard generation leans toward the plan (see Model::plan_bias).
   // Negative = the default for each memory's type (text 4, audio 100, image 2).
   double plan_strength = -1.0;
-  double plan_temp = 1.0;      // temperature for choosing plans (1 = as often as in training)
+  // Temperature for choosing plans. Negative = per type: text uses --temp
+  // (sharper plans read better), audio/image use 1 (as often as in training).
+  double plan_temp = -1.0;
   uint64_t seed = 0xC0FFEE;
 };
 

@@ -24,6 +24,8 @@ Config config_from_args(const Args& a) {
   if (a.has("sample-rate")) cfg.sample_rate = (int)a.integer("sample-rate", 0);
   if (a.has("graph")) cfg.graph = true;
   if (a.has("graph-confirm")) cfg.graph_confirm = (int)a.integer("graph-confirm", 2);
+  if (a.has("snn")) cfg.snn = true;
+  if (a.has("snn-leak")) cfg.snn_leak = (float)a.num("snn-leak", 0.6);
   if (a.has("lstm")) {
     long long n = a.integer("lstm", 0);
     if (n < 0 || n > LstmState::kMaxCells) throw std::runtime_error("--lstm must be 0..64 cells");
@@ -43,6 +45,8 @@ std::unique_ptr<Model> open_or_create(const std::string& path, const Args& a, St
     return std::make_unique<Model>(cfg);
   }
   auto m = load_state(path, s);
+  if ((a.has("snn") || a.has("snn-leak")) && !m->config().snn)
+    throw std::runtime_error(path + " already exists without an SNN; --snn only applies to new memories");
   if ((a.has("graph") || a.has("graph-confirm")) && !m->config().graph)
     throw std::runtime_error(path + " already exists without a graph; --graph only applies to new memories");
   if (a.has("lstm") && a.integer("lstm", 0) != m->config().lstm_cells)
@@ -125,8 +129,8 @@ GenOptions gen_options(const Args& a) {
   o.seed = (uint64_t)a.integer("seed", 0xC0FFEE);
   o.plan = a.has("graph-plan") || a.has("plan-strength");
   o.plan_strength = a.num("plan-strength", -1.0);
-  o.plan_temp = a.num("plan-temp", 1.0);
-  if (!(o.plan_temp > 0)) throw std::runtime_error("--plan-temp must be > 0");
+  o.plan_temp = a.num("plan-temp", -1.0);
+  if (a.has("plan-temp") && !(o.plan_temp > 0)) throw std::runtime_error("--plan-temp must be > 0");
   o.plan = o.plan || a.has("plan-temp");
   if (a.has("plan-strength") && o.plan_strength < 0) throw std::runtime_error("--plan-strength must be >= 0");
   if (!(o.temp > 0)) throw std::runtime_error("--temp must be > 0");

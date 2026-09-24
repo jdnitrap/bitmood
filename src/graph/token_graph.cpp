@@ -31,14 +31,14 @@ void TokenGraph::bump(uint64_t key, Token next) {
     return;
   }
   if (e.size() < kMaxEdges) {
-    e.push_back({next, 1});
+    e.push_back({next, 1, 1.0f});
     return;
   }
   // Full: the weakest edge (a candidate that never got its yes) makes room.
   auto weakest = std::min_element(e.begin(), e.end(), [](const Edge& a, const Edge& b) {
     return a.count < b.count || (a.count == b.count && a.to < b.to);
   });
-  if (weakest->count < confirm_) *weakest = {next, 1};
+  if (weakest->count < confirm_) *weakest = {next, 1, 1.0f};
 }
 
 void TokenGraph::add(Token t1, Token t0, Token next) {
@@ -85,12 +85,25 @@ std::vector<TokenGraph::Edge> TokenGraph::after(Token t0) const {
   return e;
 }
 
+const std::vector<TokenGraph::Edge>* TokenGraph::out(Token t0) const {
+  auto it = out_.find(key1(t0));
+  return it == out_.end() ? nullptr : &it->second;
+}
+
+TokenGraph::Edge* TokenGraph::edge(Token from, Token to) {
+  auto it = out_.find(key1(from));
+  if (it == out_.end()) return nullptr;
+  for (Edge& e : it->second)
+    if (e.to == to) return &e;
+  return nullptr;
+}
+
 std::vector<TokenGraph::Edge> TokenGraph::before(Token t) const {
   std::vector<Edge> e;
   for (const auto& kv : out_) {
     if (!(kv.first >> 63)) continue;  // order-1 keys only
     for (const Edge& x : kv.second)
-      if (x.to == t) e.push_back({(Token)(kv.first & 0xFFFFFFFFu), x.count});
+      if (x.to == t) e.push_back({(Token)(kv.first & 0xFFFFFFFFu), x.count, x.w});
   }
   std::sort(e.begin(), e.end(), [](const Edge& a, const Edge& b) { return a.count > b.count || (a.count == b.count && a.to < b.to); });
   return e;
@@ -123,6 +136,7 @@ void TokenGraph::save(Writer& w) const {
     for (const Edge& x : e) {
       w.u32(x.to);
       w.u32(x.count);
+      w.f32(x.w);
     }
   }
 }
@@ -141,7 +155,8 @@ void TokenGraph::load(Reader& r) {
     for (uint32_t j = 0; j < m; ++j) {
       Token to = r.u32();
       uint32_t c = r.u32();
-      e.push_back({to, c});
+      float sw = r.f32();
+      e.push_back({to, c, sw});
     }
   }
 }

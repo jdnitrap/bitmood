@@ -6,6 +6,7 @@
 //   audio  token = shape of a 20 ms slice of channel 0
 //   image  token = shape of an 8-pixel run; its "previous" tokens are the
 //          run above (t1) and the run to the left (t0)
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstring>
@@ -80,6 +81,10 @@ void Model::graph_advance(Stream& s, uint8_t b) const {
         g.done_len = g.wlen;
         g.t1 = g.t0;
         g.t0 = t;
+        if (cfg_.snn) {
+          const float one = 1.0f;
+          snn_step(s, &t, &one, 1);  // the finished word's neuron spikes
+        }
       }
       if (g.wlen > 0 || g.overflow) clear_plan(g);
       g.wlen = 0;
@@ -87,6 +92,7 @@ void Model::graph_advance(Stream& s, uint8_t b) const {
       if (b == '.' || b == '!' || b == '?' || b == '\n') g.capital = true;
     }
     text_graph_tree(g);
+    if (cfg_.snn) snn_text_tree(g, s.snn);
     return;
   }
 
@@ -112,6 +118,10 @@ void Model::graph_advance(Stream& s, uint8_t b) const {
     g.zero_crossings = 0;
     clear_plan(g);
     g.expect = graph_->best(g.t1, g.t0);
+    if (cfg_.snn) {
+      const float one = 1.0f;
+      snn_step(s, &code, &one, 1);  // the finished slice's neuron spikes
+    }
     return;
   }
 
@@ -139,12 +149,22 @@ void Model::graph_advance(Stream& s, uint8_t b) const {
   const Token above = y > 0 ? code(y - 1, x, std::min(x + kRunPixels, w)) : kNoToken;
   const Token left = x > 0 ? code(y, x - kRunPixels, x) : kRowStart;
   g.expect = graph_->best(above, left);
+  if (cfg_.snn) {
+    // The finished run (the new run's left neighbour) and the run above the
+    // new run spike; the "above" neuron is a separate role neuron.
+    const Token fire[2] = {left, above == kNoToken ? kNoToken : (above | kAboveRole)};
+    const float strength[2] = {1.0f, 1.0f};
+    snn_step(s, fire, strength, 2);
+  }
 }
 
 void Model::learned_byte(const Stream& s) {
   if (!graph_ || !s.graph.completed) return;
   const GraphState& g = s.graph;
   graph_->add(g.learn_t1, g.learn_t0, g.learn_next);
+  // Image SNN: the run above also connects through its role neuron.
+  if (cfg_.snn && cfg_.type == DataType::Image && g.learn_t1 != kNoToken)
+    graph_->add_order1(g.learn_t1 | kAboveRole, g.learn_next);
   if (cfg_.type == DataType::Text)
     vocab_.add(g.learn_next, std::string(g.done_word, (size_t)g.done_len));
 }
@@ -167,6 +187,16 @@ bool Model::graph_can_plan(const Stream& s) const {
 
 std::vector<TokenGraph::Candidate> Model::graph_candidates(const Stream& s) const {
   if (!graph_) return {};
+  // With the SNN, plans come from the charged neurons (they remember further back).
+  if (cfg_.snn) {
+    std::vector<TokenGraph::Candidate> c;
+    for (int i = 0; i < s.snn.n; ++i)
+      if (!snn_role_token(s.snn.tok[i])) c.push_back({s.snn.tok[i], s.snn.charge[i]});
+    if (!c.empty()) {
+      std::sort(c.begin(), c.end(), [](const auto& a, const auto& b) { return a.token < b.token; });
+      return c;
+    }
+  }
   const GraphState& g = s.graph;
   if (cfg_.type != DataType::Image) return graph_->candidates(g.t1, g.t0);
   // Image: the run above and the run to the left of the run starting now.

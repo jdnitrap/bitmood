@@ -29,6 +29,7 @@ class TokenGraph {
   struct Edge {
     Token to;
     uint32_t count;
+    float w = 1.0f;  // synapse weight (SNN): learned by three-factor learning
   };
   struct Candidate {
     Token token;
@@ -50,6 +51,12 @@ class TokenGraph {
   size_t edges(bool confirmed_only) const;
   // Order-1 edges of t0 (all, strongest first).
   std::vector<Edge> after(Token t0) const;
+  // Order-1 edges of t0 in stored order, or nullptr (SNN spike spreading).
+  const std::vector<Edge>* out(Token t0) const;
+  // The order-1 edge from -> to, or nullptr (SNN learning).
+  Edge* edge(Token from, Token to);
+  // Records an order-1 edge from a role token (e.g. "the run above") only.
+  void add_order1(Token from, Token next) { if (from != kNoToken && next != kNoToken) bump(key1(from), next); }
   // Order-1 edges pointing to `t` as (from, count), strongest first.
   std::vector<Edge> before(Token t) const;
   // Strongest confirmed order-1 edges overall: (from, to, count).

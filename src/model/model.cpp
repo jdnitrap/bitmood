@@ -62,11 +62,12 @@ Model::Model(const Config& cfg)
       hist_(size_t(1) << cfg.history_bits),
       grid_(cfg.views()),
       n_ctx_(kOrderInputs + (cfg.words() ? 2 : 0) + 2 + cfg.image_inputs() + cfg.audio_inputs() +
-             cfg.graph_table_inputs() + grid_.num_inputs()),
+             cfg.graph_table_inputs() + cfg.snn_table_inputs() + grid_.num_inputs()),
       grid_first_(n_ctx_ - grid_.num_inputs()),
       match_first_(n_ctx_),
       lstm_input_(cfg.lstm_cells > 0 ? n_ctx_ + MatchModel::kInputs : -1),
-      bias_(n_ctx_ + MatchModel::kInputs + (cfg.lstm_cells > 0 ? 1 : 0) + cfg.graph_vote_inputs()),
+      bias_(n_ctx_ + MatchModel::kInputs + (cfg.lstm_cells > 0 ? 1 : 0) + cfg.graph_vote_inputs() +
+            cfg.snn_vote_inputs()),
       n_inputs_(bias_ + 1),
       table_(cfg.table_bits),
       tracker_(grid_.num_views()),
@@ -75,9 +76,14 @@ Model::Model(const Config& cfg)
       apm2_(257 * 256) {
   if (n_inputs_ > kMaxInputs) throw std::runtime_error("too many model inputs");
   if (cfg.lstm_cells > 0) lstm_ = std::make_unique<Lstm>(cfg.lstm_cells);
-  typed_first_ = grid_first_ - cfg.graph_table_inputs() - cfg.image_inputs() - cfg.audio_inputs();
-  if (cfg.graph_table_inputs()) graph_table_input_ = grid_first_ - 1;
-  if (cfg.graph_vote_inputs()) graph_vote_input_ = bias_ - 1;
+  typed_first_ = grid_first_ - cfg.snn_table_inputs() - cfg.graph_table_inputs() - cfg.image_inputs() -
+                 cfg.audio_inputs();
+  if (cfg.graph_table_inputs()) graph_table_input_ = grid_first_ - 1 - cfg.snn_table_inputs();
+  if (cfg.snn_table_inputs()) snn_table_input_ = grid_first_ - 1;
+  if (cfg.graph_vote_inputs()) graph_vote_input_ = bias_ - 1 - cfg.snn_vote_inputs();
+  if (cfg.snn_vote_inputs()) snn_vote_input_ = bias_ - 1;
+  if (cfg.snn && !cfg.graph) throw std::runtime_error("--snn needs --graph (the network runs on the graph)");
+  if (cfg.snn && !(cfg.snn_leak > 0.0f && cfg.snn_leak < 1.0f)) throw std::runtime_error("--snn-leak must be between 0 and 1");
   if (cfg.graph) {
     if (cfg.type == DataType::Raw) throw std::runtime_error("--graph works with text, image and audio memories");
     if (cfg.graph_confirm < 1 || cfg.graph_confirm > 1000) throw std::runtime_error("--graph-confirm must be 1..1000");
@@ -102,6 +108,7 @@ std::string Model::input_name(int i) const {
   if (i == k) return "C1";
   if (i == k + 1) return "C2";
   if (i == graph_table_input_ || i == graph_vote_input_) return "G";
+  if (i == snn_table_input_ || i == snn_vote_input_) return "N";
   if (i >= typed_first_ && i < grid_first_)
     return (cfg_.type == DataType::Image ? "I" : "S") + std::to_string(i - typed_first_ + 1);
   if (i >= grid_first_ && i < match_first_) {
@@ -126,6 +133,7 @@ std::string Model::input_label(int i) const {
   if (i == k + 1) return "C classes + column";
   if (i == graph_table_input_ || i == graph_vote_input_)
     return cfg_.type == DataType::Text ? "G word graph" : (cfg_.type == DataType::Image ? "G pixel-run graph" : "G sound-shape graph");
+  if (i == snn_table_input_ || i == snn_vote_input_) return "N spiking graph";
   if (i >= typed_first_ && i < grid_first_) {
     static const char* image[6] = {"I left pixel",       "I pixel above",       "I left+above average",
                                    "I gradient L+U-UL",  "I neighbourhood",     "I colour / vertical trend"};
@@ -168,6 +176,7 @@ void Model::contexts(const Stream& s, uint64_t* out) const {
       where = (rel & 1) << 8 | (uint64_t)(s.graph.n * 4 / (uint32_t)slice_samples());
     }
     out[k++] = hash_add(hash_add(0x6A00, (uint64_t)s.graph.expect), where);
+    if (snn_table_input_ >= 0) out[k++] = hash_add(hash_add(0x5E00, (uint64_t)s.snn.predicted), where);
   }
   grid_.contexts(hist_, s, out + k);
 }
@@ -250,17 +259,20 @@ int Model::predict(const Stream& s, BitPos bp, Votes& v) const {
     v.p[lstm_input_] = lstm_->p_bit(s.lstm, bp.index, bp.partial);
     v.x[lstm_input_] = s.lstm.ready ? stretch(v.p[lstm_input_]) : 0.0f;
   }
-  if (graph_vote_input_ >= 0) {
-    const GraphState& g = s.graph;
-    if (g.tree_ready) {
+  // Tree-based votes (text G and N): P(bit) from a next-byte prefix-sum tree.
+  auto tree_vote = [&](int input, const float* tree, bool ready) {
+    if (input < 0) return;
+    if (ready) {
       const int id = (int)bp.key();
-      v.p[graph_vote_input_] = to_p16(clampf(g.tree[2 * id + 1] / g.tree[id], 1e-4f, 1.0f - 1e-4f));
-      v.x[graph_vote_input_] = stretch(v.p[graph_vote_input_]);
+      v.p[input] = to_p16(clampf(tree[2 * id + 1] / tree[id], 1e-4f, 1.0f - 1e-4f));
+      v.x[input] = stretch(v.p[input]);
     } else {
-      v.p[graph_vote_input_] = 32768;
-      v.x[graph_vote_input_] = 0.0f;
+      v.p[input] = 32768;
+      v.x[input] = 0.0f;
     }
-  }
+  };
+  tree_vote(graph_vote_input_, s.graph.tree, s.graph.tree_ready);
+  tree_vote(snn_vote_input_, s.snn.tree, s.snn.tree_ready);
   v.x[bias_] = 0.5f;
   v.p[bias_] = 32768;
 

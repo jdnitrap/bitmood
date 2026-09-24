@@ -20,7 +20,7 @@ double bpb(double bits, uint64_t bytes) { return bytes ? bits / (double)bytes : 
 }  // namespace
 
 int cmd_train(int argc, char** argv, int start) {
-  Args a(argc, argv, start, {"state", "type", "table-bits", "width", "channels", "lstm", "graph-confirm"}, {"graph"});
+  Args a(argc, argv, start, {"state", "type", "table-bits", "width", "channels", "lstm", "graph-confirm", "snn-leak"}, {"graph", "snn"});
   if (!a.has("state") || a.pos().empty())
     throw std::runtime_error(
         "usage: train --state <memory.bin> [--type text|image|audio|raw] [--table-bits 16..28] [--lstm N]\n"

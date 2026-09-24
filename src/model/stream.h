@@ -51,6 +51,7 @@ struct Stream {
   WidthFinder widths;
   LstmState lstm;    // level 2 specialist (only used when the model has one)
   GraphState graph;  // graph specialist (only used when the model has one)
+  SnnState snn;      // spiking network on the graph (only with --snn)
 };
 
 }  // namespace cmix

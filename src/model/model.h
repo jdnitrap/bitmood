@@ -18,6 +18,7 @@
 //   B1, B2                                   long match
 //   L                                        LSTM (level 2, optional)
 //   G                                        graph of words / sound shapes / pixel runs (optional)
+//   N                                        spiking network on that graph (optional)
 //   bias
 #pragma once
 
@@ -138,9 +139,17 @@ class Model {
   void audio_contexts(const Stream& s, uint64_t* out) const;
   void graph_advance(Stream& s, uint8_t b) const;
   void text_graph_tree(GraphState& g) const;
+  // SNN (model_snn.cpp): one token step (leak, then the given neurons spike).
+  void snn_step(Stream& s, const Token* fire, const float* strength, int k) const;
+  void snn_text_tree(const GraphState& g, SnnState& n) const;
+  bool snn_role_token(Token t) const;
+  // Image: the run above acts through its own "above" neuron.
+  static constexpr Token kAboveRole = 0x40000000u;
   int typed_first_ = 0;  // first image/audio input
   int graph_table_input_ = -1;  // audio/image G (table-backed)
   int graph_vote_input_ = -1;   // text G (direct vote)
+  int snn_table_input_ = -1;    // audio/image N (table-backed)
+  int snn_vote_input_ = -1;     // text N (direct vote)
 
   Config cfg_;
   History hist_;

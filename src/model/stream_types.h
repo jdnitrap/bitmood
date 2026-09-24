@@ -49,4 +49,22 @@ struct GraphState {
   double sum_sq = 0, prev_rms = 0;
 };
 
+// The spiking network on the graph (SNN), per stream: which neurons are
+// charged, which fired recently (for learning), and what it predicts.
+struct SnnState {
+  static constexpr uint32_t kNone = 0xFFFFFFFFu;
+  static constexpr int kMaxCharged = 64;
+  static constexpr int kMaxFired = 16;
+  int n = 0;                          // charged neurons in use
+  uint32_t tok[kMaxCharged] = {};     // neuron (graph node) ids
+  float charge[kMaxCharged] = {};
+  int nf = 0;                         // recently fired neurons
+  uint32_t fired[kMaxFired] = {};
+  float trace[kMaxFired] = {};        // eligibility: 1 when fired, decays each step
+  uint32_t predicted = kNone;         // most-charged neuron after the last spike
+  // Text: next-byte distribution from the charged words, as a prefix-sum tree.
+  float tree[512] = {};
+  bool tree_ready = false;
+};
+
 }  // namespace cmix

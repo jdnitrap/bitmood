@@ -200,6 +200,23 @@ for spec in "image a.ppm" "audio tone.wav"; do
   check "--type $1 --graph round trip is byte-identical" "cmp -s '$T/$2' '$T/gt.out'"
 done
 
+echo "spiking network (SNN) on the graph"
+$BIN train --state "$T/n1.st" --graph --snn --table-bits 18 README.md CONVERSATION.md 2>/dev/null
+$BIN train --state "$T/n2.st" --graph --snn --table-bits 18 README.md 2>/dev/null
+$BIN train --state "$T/n2.st" CONVERSATION.md 2>/dev/null
+check "SNN memory: one run == two runs" "cmp -s '$T/n1.st' '$T/n2.st'"
+check "info lists the N vote" "$BIN info '$T/n1.st' | grep -q ' N bias'"
+check "--snn without --graph is rejected" "! $BIN train --state '$T/n3.st' --snn README.md 2>/dev/null"
+check "--snn-leak 1.5 is rejected" "! $BIN train --state '$T/n4.st' --graph --snn --snn-leak 1.5 README.md 2>/dev/null"
+q1=$($BIN generate 200 "The " --state "$T/n1.st" --graph-plan --seed 4 | md5sum)
+q2=$($BIN generate 200 "The " --state "$T/n1.st" --graph-plan --seed 4 | md5sum)
+check "SNN --graph-plan is repeatable with the same seed" "[ '$q1' = '$q2' ]"
+for spec in "text CONVERSATION.md" "image $T/a.ppm" "audio $T/tone.wav"; do
+  set -- $spec
+  $BIN compress --type $1 --graph --snn "$2" "$T/sn.cmxb" 2>/dev/null && $BIN decompress "$T/sn.cmxb" "$T/sn.out" 2>/dev/null
+  check "--type $1 --graph --snn round trip is byte-identical" "cmp -s '$2' '$T/sn.out'"
+done
+
 echo "grid views"
 words=(alpha beta gamma delta)
 for i in $(seq 400); do  # 23-byte records; the word and number vary without a longer period

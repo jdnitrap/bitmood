@@ -29,6 +29,8 @@ struct Config {
   int lstm_cells = 0;      // level 2 LSTM specialist size (0 = off)
   bool graph = false;      // graph specialist G on
   int graph_confirm = 2;   // times an edge must be seen before it votes
+  bool snn = false;        // spiking network on the graph (needs graph)
+  float snn_leak = 0.6f;   // charge kept per token step (0..1)
 
   // The grid views this type starts with.
   std::vector<View> views() const;
@@ -42,6 +44,9 @@ struct Config {
   // Graph specialist: a table-backed context for audio/image, a direct vote for text.
   int graph_table_inputs() const { return graph && type != DataType::Text && type != DataType::Raw ? 1 : 0; }
   int graph_vote_inputs() const { return graph && type == DataType::Text ? 1 : 0; }
+  // SNN vote N: same split as G (table-backed for audio/image, direct for text).
+  int snn_table_inputs() const { return snn && graph_table_inputs() ? 1 : 0; }
+  int snn_vote_inputs() const { return snn && graph_vote_inputs() ? 1 : 0; }
 };
 
 }  // namespace cmix
